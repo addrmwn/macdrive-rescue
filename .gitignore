@@ -20,3 +20,4 @@ native/dist/*.exp
 # Release artifacts
 dist/
 *.logMacDriveRescue-win64.zip
+MacDriveRescue-Portable.exe

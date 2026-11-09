@@ -52,13 +52,44 @@ Dibangun dengan **Flutter** dan **Dart FFI** ke library native C (libfsapfs, lib
 
 ## Cara pakai
 
+**Opsi A — satu file portable (paling mudah):**
+
+1. Unduh `MacDriveRescue-Portable.exe` dari [halaman Releases](https://github.com/addrmwn/macdrive-rescue/releases).
+2. Double-click file tersebut (klik **Yes** pada prompt UAC).
+
+**Opsi B — zip portable:**
+
 1. Unduh `MacDriveRescue-win64.zip` dari [halaman Releases](https://github.com/addrmwn/macdrive-rescue/releases).
-2. Ekstrak ke folder mana pun, jalankan `macdrive_rescue.exe` (klik **Yes** pada prompt UAC).
-3. Pilih volume Mac pada dropdown (volume `… - Data` biasanya berisi data pengguna).
-4. Klik **Pilih Folder…** untuk memilih folder tertentu, atau **Seluruh Volume**.
-5. Pilih folder tujuan Windows.
-6. Atur opsi (default sudah aman).
-7. Klik **Pindai Sumber**, lalu **Mulai Transfer**.
+2. Ekstrak ke folder mana pun, jalankan `macdrive_rescue.exe` (klik **Yes** pada UAC).
+
+**Langkah pemakaian (sama untuk kedua opsi):**
+
+1. Pilih volume Mac pada dropdown (volume `… - Data` biasanya berisi data pengguna).
+2. Klik **Pilih Folder…** untuk memilih folder tertentu, atau **Seluruh Volume**.
+3. Pilih folder tujuan Windows.
+4. Atur opsi (default sudah aman).
+5. Klik **Pindai Sumber**, lalu **Mulai Transfer**.
+
+## Membuat file EXE
+
+Flutter menghasilkan `macdrive_rescue.exe` di `build\windows\x64\runner\Release\`,
+tetapi exe itu membutuhkan file pendukung di sebelahnya (`data\`,
+`flutter_windows.dll`, `macfs.dll`). Untuk distribusi:
+
+- **Zip portable** (cara paling sederhana):
+  ```powershell
+  Compress-Archive -Path build/windows/x64/runner/Release/* `
+      -DestinationPath MacDriveRescue-win64.zip -Force
+  ```
+  Pengguna mengekstrak zip lalu menjalankan `macdrive_rescue.exe`.
+
+- **Satu file exe tunggal** (self-extracting, auto-run):
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File native/make_portable.ps1
+  ```
+  Menghasilkan `MacDriveRescue-Portable.exe` (~8 MB): double-click langsung
+  jalan — payload diekstrak ke folder temp secara otomatis. Membutuhkan
+  7-Zip terpasang (script mengunduh SFX resmi dari LZMA SDK).
 
 ## Build dari source
 

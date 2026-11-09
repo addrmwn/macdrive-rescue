@@ -1,0 +1,5 @@
+;!@Install@!UTF-8!
+Title="MacDrive Rescue"
+RunProgram="macdrive_rescue.exe"
+GUIMode="0"
+;!@InstallEnd@!
