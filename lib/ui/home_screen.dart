@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:macdrive_rescue/core/discovery.dart';
 import 'package:macdrive_rescue/core/engine.dart';
 import 'package:macdrive_rescue/core/macfs_ffi.dart';
+import 'package:macdrive_rescue/core/settings.dart';
 import 'package:macdrive_rescue/ui/theme.dart';
 import 'package:macdrive_rescue/ui/widgets.dart';
 
@@ -44,6 +45,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _status = 'Menyiapkan...';
   String _freeSpace = '';
   void Function()? _cancelCopy;
+  // File yang gagal pada transfer terakhir (untuk tombol "Coba Lagi").
+  List<FileTask> _failedFiles = [];
+  String _lastDestRoot = '';
 
   // Opsi
   bool _optSkipSystem = true;
@@ -57,9 +61,47 @@ class _HomeScreenState extends State<HomeScreen> {
   String _optSymlinks = 'skip';
   String _optColon = '-';
 
+  SavedSettings? _settings;
+
+  Future<void> _loadSettings() async {
+    final s = await SavedSettings.load();
+    if (!mounted) return;
+    setState(() {
+      _settings = s;
+      if (s.destPath != null && s.destPath!.isNotEmpty) {
+        _destController.text = s.destPath!;
+      }
+      _optSkipSystem = s.skipSystem;
+      _optSkipHidden = s.skipHidden;
+      _optSkipBuild = s.skipBuild;
+      _optSkipApps = s.skipApps;
+      _optPreserveTimes = s.preserveTimes;
+      _optOverwrite = s.overwrite;
+      _optSymlinks = s.symlinks;
+      _optColon = s.colonReplacement;
+    });
+    _updateFreeSpace();
+  }
+
+  void _saveSettings() {
+    SavedSettings.save(
+      destPath: _destController.text.trim(),
+      lastVolumeName: _selectedDrive?.volumeName,
+      skipSystem: _optSkipSystem,
+      skipHidden: _optSkipHidden,
+      skipBuild: _optSkipBuild,
+      skipApps: _optSkipApps,
+      preserveTimes: _optPreserveTimes,
+      overwrite: _optOverwrite,
+      symlinks: _optSymlinks,
+      colonReplacement: _optColon,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadSettings();
     _checkAdmin().then((ok) {
       setState(() => _isAdmin = ok);
       if (ok) {
@@ -225,7 +267,17 @@ class _HomeScreenState extends State<HomeScreen> {
       final usable = drives.where((d) => d.isUsable).toList();
       if (usable.isNotEmpty) {
         _log('Ditemukan ${usable.length} drive Mac yang bisa dibaca.', level: _LogLevel.ok);
-        _selectDrive(usable.first);
+        final last = _settings?.lastVolumeName;
+        MacDrive pick = usable.first;
+        if (last != null) {
+          for (final d in usable) {
+            if (d.volumeName == last) {
+              pick = d;
+              break;
+            }
+          }
+        }
+        _selectDrive(pick);
       } else {
         _log('Tidak ada drive Mac yang bisa dibaca.', level: _LogLevel.warn);
         _setStatus('Tidak ada drive Mac terdeteksi. Pastikan drive terpasang, lalu klik Pindai Ulang.');
@@ -266,12 +318,18 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _sourcePath = result.path.isEmpty ? null : result.path;
       _sourceLabel = result.path.isEmpty ? drive.volumeName : result.name;
-      _sourceHint = result.path.isEmpty
-          ? 'Seluruh isi volume akan disalin ke folder tujuan'
-          : 'Folder ${result.name} akan muncul langsung di dalam folder tujuan';
+      if (result.path.isEmpty) {
+        _sourceHint = 'Seluruh isi volume akan disalin ke folder tujuan';
+      } else if (result.isFile) {
+        _sourceHint = 'File ${result.name} akan disalin ke folder tujuan';
+      } else {
+        _sourceHint =
+            'Folder ${result.name} akan muncul langsung di dalam folder tujuan';
+      }
       _scanResult = null;
+      _failedFiles.clear();
     });
-    _log('Folder sumber dipilih: ${result.name}');
+    _log('Sumber dipilih: ${result.name}${result.isFile ? ' (file)' : ''}');
     await _scanSource();
   }
 
@@ -363,10 +421,18 @@ final result = await scanVolume(
   }
 
   // ---------------------------------------------------------------- copy
-  Future<void> _startCopy() async {
+  /// Menyalin [scan]. Bila [onlyFiles] diberikan (retry), hanya file itu
+  /// yang disalin dan dialog konfirmasi dilewati.
+  Future<void> _startCopy({List<FileTask>? onlyFiles}) async {
     final drive = _selectedDrive;
     final scan = _scanResult;
     if (drive == null || scan == null) return;
+    final isRetry = onlyFiles != null && onlyFiles.isNotEmpty;
+    final filesToCopy = isRetry ? onlyFiles : scan.files;
+    final dirsToCopy = isRetry ? const <DirTask>[] : scan.dirs;
+    final totalBytes = isRetry
+        ? filesToCopy.fold<int>(0, (sum, f) => sum + f.size)
+        : scan.totalBytes;
     final dest = _destController.text.trim();
     if (dest.isEmpty) {
       _log('Folder tujuan belum dipilih.', level: _LogLevel.warn);
@@ -379,27 +445,29 @@ final result = await scanVolume(
       return;
     }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Mulai menyalin?'),
-        content: Text(
-          '${scan.files.length} file (${_humanSize(scan.totalBytes)}) akan disalin ke:\n\n$dest'
-          '${_optDryRun ? '\n\nMode simulasi aktif — tidak ada file yang ditulis.' : ''}',
+    if (!isRetry) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Mulai menyalin?'),
+          content: Text(
+            '${filesToCopy.length} file (${_humanSize(totalBytes)}) akan disalin ke:\n\n$dest'
+            '${_optDryRun ? '\n\nMode simulasi aktif — tidak ada file yang ditulis.' : ''}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Mulai'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Mulai'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+      );
+      if (confirmed != true || !mounted) return;
+    }
 
     setState(() {
       _copying = true;
@@ -408,35 +476,46 @@ final result = await scanVolume(
       _speed = '';
       _eta = '';
       _currentFile = '';
-      _summary = 'Menyalin...';
+      _summary = isRetry ? 'Mencoba ulang file yang gagal...' : 'Menyalin...';
     });
     _setStatus('Menyalin data...');
     _log('Mulai menyalin ke: $dest');
+    _saveSettings();
 
     var bytesDone = 0;
     final started = DateTime.now();
 
-    void onEvent(Map<String, dynamic> event) {
+void onEvent(Map<String, dynamic> event) {
       if (!mounted) return;
       final kind = event['kind'];
       if (kind == 'progress') {
         bytesDone += event['bytes'] as int;
-        final total = scan.totalBytes <= 0 ? 1 : scan.totalBytes;
+        final total = totalBytes <= 0 ? 1 : totalBytes;
         final elapsed = DateTime.now().difference(started).inMilliseconds / 1000.0;
         final speed = elapsed <= 0 ? 0.0 : bytesDone / elapsed;
         final pct = (bytesDone * 100.0 / total).clamp(0.0, 100.0);
+        final index = event['fileIndex'] as int?;
+        final fileTotal = event['fileTotal'] as int?;
         setState(() {
           _progress = pct / 100.0;
           _progressText = '${pct.toStringAsFixed(1)}%';
           _speed = _humanSpeed(speed);
           _eta = 'Sisa ${_humanEta(speed > 0 ? (total - bytesDone) / speed : null)}';
-          _currentFile = event['rel'] as String? ?? '';
+          final rel = event['rel'] as String? ?? '';
+          _currentFile = (index != null && fileTotal != null)
+              ? 'File $index/$fileTotal  $rel'
+              : rel;
         });
+      } else if (kind == 'retry') {
+        _log(
+          'Mencoba ulang (${event['attempt']}/3): ${event['rel'] ?? ''}',
+          level: _LogLevel.warn,
+        );
       } else if (kind == 'file') {
         final status = event['status'];
         final rel = event['rel'] as String? ?? '';
         if (status == 'error') {
-          _log('GAGAL: $rel — ${event['error'] ?? ''}', level: _LogLevel.error);
+          _log('GAGAL: $rel - ${event['error'] ?? ''}', level: _LogLevel.error);
         } else if (status == 'ok') {
           final index = event['index'] as int? ?? 0;
           if (index % 200 == 0) _log('Tersalin: $rel');
@@ -450,6 +529,16 @@ final result = await scanVolume(
         final bytes = event['bytesCopied'] as int;
         final duration = (event['durationSeconds'] as num).toDouble();
         final errors = (event['errors'] as List).cast<List>();
+        final failedTasks = (event['failedTasks'] as List? ?? [])
+            .map((e) {
+              final map = e as Map;
+              return FileTask(
+                List<String>.from(map['rel'] as List),
+                List<String>.from(map['dest'] as List),
+                map['size'] as int,
+              );
+            })
+            .toList();
         setState(() {
           _copying = false;
           _progress = 1.0;
@@ -459,6 +548,8 @@ final result = await scanVolume(
           _speed = _humanSpeed(duration > 0 ? bytes / duration : 0);
           _summary =
               'Selesai: $copied file tersalin (${_humanSize(bytes)}), $skipped dilewati, $failed gagal.';
+          _failedFiles = failedTasks;
+          _lastDestRoot = dest;
         });
         _setStatus('Transfer selesai.');
         _log(
@@ -505,8 +596,8 @@ final result = await scanVolume(
         volumeIndex: drive.volumeIndex,
         destRoot: dest,
         options: _options(),
-        files: scan.files,
-        dirs: scan.dirs,
+        files: filesToCopy,
+        dirs: dirsToCopy,
         onEvent: onEvent,
       );
     } catch (e) {
@@ -515,6 +606,13 @@ final result = await scanVolume(
       _log('Transfer gagal: $e', level: _LogLevel.error);
       _setStatus('Transfer gagal.');
     }
+  }
+
+  Future<void> _retryFailed() async {
+    if (_failedFiles.isEmpty || _copying || _scanning) return;
+    final count = _failedFiles.length;
+    _log('Mencoba ulang $count file yang gagal...', level: _LogLevel.warn);
+    await _startCopy(onlyFiles: List<FileTask>.from(_failedFiles));
   }
 
   void _openDestination() {
@@ -939,6 +1037,14 @@ const SizedBox(width: 12),
               ? null
               : _startCopy,
         ),
+        if (_failedFiles.isNotEmpty && !_copying && !_scanning) ...[
+          const SizedBox(width: 8),
+          SecondaryButton(
+            label: 'Coba Lagi yang Gagal (${_failedFiles.length})',
+            icon: Icons.replay_rounded,
+            onPressed: _retryFailed,
+          ),
+        ],
         const SizedBox(width: 8),
         SecondaryButton(
           label: 'Buka Folder Tujuan',
@@ -1146,7 +1252,8 @@ class _LogEntry {
 class FolderSelection {
   final String path; // relatif terhadap volume ("" = root)
   final String name;
-  const FolderSelection(this.path, this.name);
+  final bool isFile;
+  const FolderSelection(this.path, this.name, {this.isFile = false});
 }
 
 class _FolderBrowserDialog extends StatefulWidget {
@@ -1314,7 +1421,7 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Pilih folder di ${widget.drive.volumeName}',
+                'Pilih file atau folder di ${widget.drive.volumeName}',
                 style: const TextStyle(
                   color: AppColors.text,
                   fontSize: 16,
@@ -1323,7 +1430,7 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
               ),
               const SizedBox(height: 3),
               const Text(
-                'Klik folder untuk membuka. Klik "Salin Folder Ini" untuk memilih folder yang ditandai.',
+                'Klik folder untuk membuka, atau tandai file/folder lalu klik tombol di kanan bawah.',
                 style: TextStyle(color: AppColors.muted, fontSize: 11.5),
               ),
               const SizedBox(height: 12),
@@ -1359,7 +1466,7 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
                     child: Text(
                       _selected == null
                           ? ''
-                          : 'Dipilih: ${_selected!.path.isEmpty ? widget.drive.volumeName : _selected!.name}',
+                          : 'Dipilih: ${_selected!.path.isEmpty ? widget.drive.volumeName : _selected!.name}${_selected!.isDir ? '' : ' (file)'}',
                       style: const TextStyle(
                           color: AppColors.muted, fontSize: 12),
                       overflow: TextOverflow.ellipsis,
@@ -1371,7 +1478,9 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
                   ),
                   const SizedBox(width: 8),
                   PrimaryButton(
-                    label: 'Salin Folder Ini',
+                    label: _selected?.isDir == false
+                        ? 'Salin File Ini'
+                        : 'Salin Folder Ini',
                     icon: Icons.check_rounded,
                     onPressed: _selected == null
                         ? null
@@ -1382,6 +1491,7 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
                                 _selected!.path.isEmpty
                                     ? widget.drive.volumeName
                                     : _selected!.name,
+                                isFile: !_selected!.isDir,
                               ),
                             ),
                   ),

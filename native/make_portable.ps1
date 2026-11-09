@@ -1,4 +1,4 @@
-# Membuat satu file exe portable (self-extracting) dari hasil build Flutter.
+﻿# Membuat satu file exe portable (self-extracting) dari hasil build Flutter.
 #
 # Hasil: MacDriveRescue-Portable.exe — double-click langsung jalan
 # (ekstrak ke temp + auto-run). Hanya butuh UAC untuk akses raw disk.
@@ -60,12 +60,32 @@ $payload = Join-Path $env:TEMP "macdrive_payload.7z"
 if (Test-Path $payload) { Remove-Item $payload -Force }
 & $sevenZip a -t7z -mx=5 $payload "$release\*" | Out-Null
 
-# Gabungkan SFX + config + payload.
+# Pasang icon pada SFX SEBELUM payload digabungkan.
+# Catatan: rcedit tidak bisa dipakai setelah payload di-append (payload hilang).
+$icon = Join-Path $root "windows\runner\resources\app_icon.ico"
+$rcedit = Join-Path $env:TEMP "rcedit.exe"
+if (-not (Test-Path $rcedit)) {
+  Write-Host "[2b] Mengunduh rcedit (untuk icon exe)..."
+  try {
+    Invoke-WebRequest "https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe" `
+        -OutFile $rcedit -UseBasicParsing
+  } catch {
+    Write-Host "[PERINGATAN] Gagal mengunduh rcedit: $_"
+  }
+}
+$sfxBranded = Join-Path $env:TEMP "7zS2_icon.sfx"
+Copy-Item $sfx $sfxBranded -Force
+if ((Test-Path $rcedit) -and (Test-Path $icon)) {
+  & $rcedit $sfxBranded --set-icon $icon | Out-Null
+  Write-Host "      Icon dipasang pada SFX"
+}
+
+# Gabungkan SFX (ber-icon) + config + payload.
 Write-Host "[3/4] Menggabungkan SFX..."
 $out = Join-Path $root "MacDriveRescue-Portable.exe"
 $combined = Join-Path $env:TEMP "macdrive_combined.exe"
 if (Test-Path $combined) { Remove-Item $combined -Force }
-cmd /c "copy /b `"$sfx`" + `"$config`" + `"$payload`" `"$combined`"" | Out-Null
+cmd /c "copy /b `"$sfxBranded`" + `"$config`" + `"$payload`" `"$combined`"" | Out-Null
 Move-Item $combined $out -Force
 
 $size = [math]::Round((Get-Item $out).Length / 1MB, 1)

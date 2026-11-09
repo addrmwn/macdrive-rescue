@@ -278,16 +278,19 @@ Future<Map<String, dynamic>> _scanWorker(_ScanMessage msg) async {
   var skippedFiles = 0;
   var skippedDirs = 0;
 
-  // Entry root / start.
+// Entry root / start.
   int rootId;
   String? startName;
+  var startIsFile = false;
   if (msg.startPath != null && msg.startPath!.isNotEmpty) {
     rootId = _openPath(volume, msg.startPath!);
     if (rootId == 0) {
       volume.close();
-      throw MacFsException('Folder tidak ditemukan: ${msg.startPath}');
+      throw MacFsException('File/folder tidak ditemukan: ${msg.startPath}');
     }
     startName = msg.startPath!.split('/').last;
+    final mode = volume.entryMode(rootId);
+    startIsFile = (mode & sIFMT) != sIFDIR;
   } else {
     rootId = volume.rootId();
   }
@@ -338,7 +341,15 @@ Future<Map<String, dynamic>> _scanWorker(_ScanMessage msg) async {
 
 final initialRel = <String>[];
   final initialDest = <String>[];
-  if (startName != null) {
+  if (startName != null && startIsFile) {
+    // Sumber berupa file tunggal: salin file itu saja ke folder tujuan.
+    final fullRel =
+        msg.startPath!.split('/').where((p) => p.isNotEmpty).toList();
+    final safe = sanitizeComponent(startName,
+        colonReplacement: options.colonReplacement);
+    files.add(FileTask(fullRel, [safe], volume.entrySize(rootId)));
+    totalBytes += volume.entrySize(rootId);
+  } else if (startName != null) {
     // relParts = path lengkap dari root volume (untuk membuka file saat copy).
     initialRel.addAll(
         msg.startPath!.split('/').where((p) => p.isNotEmpty).toList());
@@ -346,8 +357,10 @@ final initialRel = <String>[];
     initialDest.add(sanitizeComponent(startName,
         colonReplacement: options.colonReplacement));
     dirs.add(DirTask(initialRel, initialDest, volume.entryMtimeNs(rootId)));
+    walk(rootId, initialRel, initialDest);
+  } else {
+    walk(rootId, initialRel, initialDest);
   }
-  walk(rootId, initialRel, initialDest);
   volume.close();
 
   return {
@@ -527,6 +540,7 @@ void _copyWorker(_CopyMessage msg) {
     var verifyFailed = 0;
     final errors = <List<String>>[];
     final manifest = <List<String>>[];
+    final failedTasks = <Map<String, dynamic>>[];
     final started = DateTime.now();
 
     final destRoot = msg.destRoot;
@@ -594,20 +608,41 @@ for (final f in msg.files) {
         if (entryId == 0) {
           throw 'tidak bisa membuka file di volume';
         }
-        try {
+try {
           final sink = File(destPath).openSync(mode: FileMode.write);
           final buffer = Uint8List(4 * 1024 * 1024);
           var offset = 0;
+          var retries = 0;
           while (offset < size) {
-            final read = volume.readInto(entryId, buffer, offset);
-            if (read <= 0) break;
+            var read = volume.readInto(entryId, buffer, offset);
+            if (read <= 0) {
+              // Retry: koneksi USB/disk kadang gagal sesaat.
+              if (retries < 3) {
+                retries++;
+                msg.progressPort.send({
+                  'kind': 'retry',
+                  'rel': relDisplay,
+                  'attempt': retries,
+                });
+                sleep(const Duration(milliseconds: 300));
+                continue;
+              }
+              break;
+            }
+            retries = 0;
             sink.writeFromSync(buffer, 0, read);
             offset += read;
-            msg.progressPort.send({'kind': 'progress', 'rel': relDisplay, 'bytes': read});
+            msg.progressPort.send({
+              'kind': 'progress',
+              'rel': relDisplay,
+              'bytes': read,
+              'fileIndex': index,
+              'fileTotal': total,
+            });
           }
           sink.closeSync();
           if (offset != size) {
-            throw 'pembacaan tidak lengkap (${offset}/${size})';
+            throw 'pembacaan tidak lengkap (${offset}/${size}) setelah 3 percobaan';
           }
         } finally {
           volume.release(entryId);
@@ -642,6 +677,7 @@ if (options.preserveTimes) {
       } catch (e) {
         filesFailed++;
         errors.add([relDisplay, e.toString()]);
+        failedTasks.add({'rel': relParts, 'dest': destParts, 'size': size});
         msg.progressPort.send({
           'kind': 'file',
           'rel': relDisplay,
@@ -676,6 +712,7 @@ if (options.preserveTimes) {
       'cancelled': false,
       'errors': errors,
       'manifest': manifest,
+      'failedTasks': failedTasks,
     });
   } catch (e) {
     msg.resultPort.send({

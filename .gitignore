@@ -1,4 +1,4 @@
-# Byte-compiled / cache
+﻿# Byte-compiled / cache
 __pycache__/
 *.py[cod]
 .venv/
@@ -19,5 +19,6 @@ native/dist/*.exp
 
 # Release artifacts
 dist/
-*.logMacDriveRescue-win64.zip
+*.log
+MacDriveRescue-win64.zip
 MacDriveRescue-Portable.exe
