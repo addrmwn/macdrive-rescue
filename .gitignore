@@ -1,0 +1,10 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.log
+
+# Test artifacts
+.pytest_cache/
