@@ -31,6 +31,15 @@ if (-not (Test-Path $launcher)) {
 
 Copy-Item $dll $release -Force
 
+# Sertakan helper update (dipakai fitur auto-update).
+$updaterExe = Join-Path $PSScriptRoot "dist\macfs_updater.exe"
+if (Test-Path $updaterExe) {
+  Copy-Item $updaterExe $release -Force
+  Write-Host "      macfs_updater.exe disertakan"
+} else {
+  Write-Host "[PERINGATAN] macfs_updater.exe tidak ada - auto-update tidak akan berfungsi"
+}
+
 $sevenZip = "C:\Program Files\7-Zip\7z.exe"
 if (-not (Test-Path $sevenZip)) {
   $sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source

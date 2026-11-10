@@ -12,7 +12,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-const appVersion = '2.3.2';
+const appVersion = '2.3.3';
 
 const _repoOwner = 'addrmwn';
 const _repoName = 'macdrive-rescue';
@@ -169,26 +169,35 @@ class Updater {
     }
   }
 
-  /// Ekstrak zip lalu jalankan skrip update; aplikasi akan menutup diri.
-  /// Skrip menunggu proses ini selesai, menyalin file baru, dan membuka ulang.
+  /// Memasang update: ekstrak payload, lalu jalankan helper native
+  /// (macfs_updater.exe) yang menunggu aplikasi keluar, menyalin file,
+  /// dan membuka ulang aplikasi. Aplikasi pemanggil harus memanggil exit()
+  /// setelah fungsi ini selesai.
   static Future<void> applyAndRestart(File zip) async {
     final exePath = Platform.resolvedExecutable;
     final installDir = File(exePath).parent.path;
-    final currentPid = pid;
+
+    // Helper native berada di samping exe aplikasi.
+    final helper = File('$installDir\\macfs_updater.exe');
+    if (!helper.existsSync()) {
+      throw UpdateException(
+          'Helper update tidak ditemukan (macfs_updater.exe). '
+          'Unduh ulang aplikasi dari halaman rilis.');
+    }
 
     final temp = Directory.systemTemp.createTempSync('macfs_apply_');
     final extractDir = Directory('${temp.path}\\payload')..createSync();
 
     // Ekstrak dengan tar.exe bawaan Windows.
-    final tar = await Process.run('tar', ['-xf', zip.path, '-C', extractDir.path]);
+    final tar =
+        await Process.run('tar', ['-xf', zip.path, '-C', extractDir.path]);
     if (tar.exitCode != 0) {
       throw UpdateException(
           'Gagal mengekstrak: ${tar.stderr.toString().trim()}');
     }
 
-    // Verifikasi payload lengkap SEBELUM menimpa instalasi.
-    // Tanpa langkah ini, update yang korup bisa merusak aplikasi
-    // (mis. folder data hilang -> app tidak bisa dibuka).
+    // Verifikasi payload lengkap SEBELUM menimpa instalasi, agar update
+    // yang korup tidak merusak aplikasi (mis. folder data hilang).
     final required = [
       'macdrive_rescue.exe',
       'flutter_windows.dll',
@@ -203,33 +212,20 @@ class Updater {
       }
     }
 
-    final script = '''
-@echo off
-setlocal
-:wait
-tasklist /FI "PID eq $currentPid" 2>nul | find "$currentPid" >nul
-if not errorlevel 1 (
-  timeout /t 1 /nobreak >nul
-  goto wait
-)
-robocopy "EXTRACT_PLACEHOLDER" "$installDir" /E /IS /NFL /NDL /NJH /NJS /R:3 /W:1 >nul
-start "" "$exePath"
-cd /d "%TEMP%"
-rmdir /S /Q "TEMP_PLACEHOLDER" >nul 2>&1
-del "%~f0" >nul 2>&1
-'''
-        .replaceAll("EXTRACT_PLACEHOLDER", extractDir.path)
-        .replaceAll("TEMP_PLACEHOLDER", temp.path);
-
-    final batPath = '${Directory.systemTemp.path}\\macfs_update_\${currentPid}.bat';
-    await File(batPath).writeAsString(script, flush: true);
-
+    // Jalankan helper native (tanpa jendela console).
     await Process.start(
-      'cmd.exe',
-      ['/c', batPath],
+      helper.path,
+      [
+        '--pid', '$pid',
+        '--src', extractDir.path,
+        '--dst', installDir,
+        '--exe', exePath,
+      ],
       mode: ProcessStartMode.detached,
       workingDirectory: Directory.systemTemp.path,
     );
-  }
 
+    // Beri waktu helper start sebelum aplikasi keluar.
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+  }
 }
