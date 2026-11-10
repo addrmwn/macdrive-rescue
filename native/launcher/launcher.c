@@ -1,21 +1,18 @@
 /*
- * launcher.c - bootstrap kecil untuk MacDriveRescue-Portable.exe
+ * launcher.c - bootstrap untuk MacDriveRescue-Portable.exe
  *
  * Perilaku:
- *  1. Jika %LOCALAPPDATA%\MacDriveRescue\macdrive_rescue.exe sudah ada,
- *     langsung jalankan (tanpa ekstrak ulang) -> lokasi instalasi stabil
- *     sehingga self-update berfungsi.
- *  2. Jika belum ada, ekstrak payload ZIP yang ditempelkan di akhir file ini
- *     ke folder instalasi, lalu jalankan.
+ *  1. Verifikasi instalasi di %LOCALAPPDATA%\MacDriveRescue LENGKAP
+ *     (exe + data\app.so + macfs.dll + marker versi).
+ *  2. Bila tidak lengkap / versi berbeda -> ekstrak ulang payload (menimpa).
+ *  3. Jalankan exe dari folder instalasi yang stabil (agar self-update jalan).
  *
  * Format paket (di akhir file):
- *   [8 byte payload offset][8 byte payload size][magic "MACFSZP1" 8 byte]
- *   Payload = arsip ZIP (dibuat oleh make_portable.ps1).
+ *   [payload ZIP][8B launcher size][8B payload size][magic "MACFSZP1"]
  */
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <shellapi.h>
 #include <shlobj.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,6 +20,7 @@
 
 #define MAGIC "MACFSZP1"
 #define TRAILER_SIZE 24
+#define VERSION_MARKER "version.txt"
 
 static void launcher_fail(const wchar_t *message) {
     MessageBoxW(NULL, message, L"MacDrive Rescue", MB_ICONERROR | MB_OK);
@@ -38,9 +36,7 @@ static int copy_payload(const wchar_t *self, uint64_t offset, uint64_t length,
                         const wchar_t *destination) {
     HANDLE source = CreateFileW(self, GENERIC_READ, FILE_SHARE_READ, NULL,
                                 OPEN_EXISTING, 0, NULL);
-    if (source == INVALID_HANDLE_VALUE) {
-        return 0;
-    }
+    if (source == INVALID_HANDLE_VALUE) return 0;
     HANDLE target = CreateFileW(destination, GENERIC_WRITE, 0, NULL,
                                 CREATE_ALWAYS, 0, NULL);
     if (target == INVALID_HANDLE_VALUE) {
@@ -53,16 +49,11 @@ static int copy_payload(const wchar_t *self, uint64_t offset, uint64_t length,
 
     char buffer[65536];
     uint64_t remaining = length;
-    DWORD got = 0;
-    DWORD wrote = 0;
+    DWORD got = 0, wrote = 0;
     while (remaining > 0) {
         DWORD chunk = (DWORD)(remaining > sizeof(buffer) ? sizeof(buffer) : remaining);
-        if (!ReadFile(source, buffer, chunk, &got, NULL) || got == 0) {
-            break;
-        }
-        if (!WriteFile(target, buffer, got, &wrote, NULL) || wrote != got) {
-            break;
-        }
+        if (!ReadFile(source, buffer, chunk, &got, NULL) || got == 0) break;
+        if (!WriteFile(target, buffer, got, &wrote, NULL) || wrote != got) break;
         remaining -= got;
     }
     CloseHandle(target);
@@ -71,23 +62,21 @@ static int copy_payload(const wchar_t *self, uint64_t offset, uint64_t length,
 }
 
 static int extract_zip(const wchar_t *zip_path, const wchar_t *destination) {
-    /* Windows 10 1803+ menyertakan bsdtar yang bisa mengekstrak zip. */
     wchar_t tar_path[MAX_PATH];
     GetSystemDirectoryW(tar_path, MAX_PATH);
     wcscat_s(tar_path, MAX_PATH, L"\\tar.exe");
-    if (!file_exists(tar_path)) {
-        return 0;
-    }
+    if (!file_exists(tar_path)) return 0;
+
     wchar_t command[32768];
-    _snwprintf(command, 32768, L"\"%s\" -xf \"%s\" -C \"%s\"", tar_path, zip_path,
-               destination);
+    _snwprintf(command, 32768, L"\"%s\" -xf \"%s\" -C \"%s\"", tar_path,
+               zip_path, destination);
     STARTUPINFOW startup;
     PROCESS_INFORMATION process;
     ZeroMemory(&startup, sizeof(startup));
     ZeroMemory(&process, sizeof(process));
     startup.cb = sizeof(startup);
-    if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL,
-                        NULL, &startup, &process)) {
+    if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
+                        NULL, NULL, &startup, &process)) {
         return 0;
     }
     WaitForSingleObject(process.hProcess, INFINITE);
@@ -96,6 +85,27 @@ static int extract_zip(const wchar_t *zip_path, const wchar_t *destination) {
     CloseHandle(process.hProcess);
     CloseHandle(process.hThread);
     return exit_code == 0;
+}
+
+/* Instalasi dianggap lengkap bila semua file inti ada. */
+static int install_is_complete(const wchar_t *install_dir,
+                               const wchar_t *exe_path) {
+    wchar_t probe[MAX_PATH * 2];
+
+    if (!file_exists(exe_path)) return 0;
+
+    _snwprintf(probe, MAX_PATH * 2, L"%s\\data\\app.so", install_dir);
+    if (!file_exists(probe)) return 0;
+
+    _snwprintf(probe, MAX_PATH * 2, L"%s\\flutter_windows.dll", install_dir);
+    if (!file_exists(probe)) return 0;
+
+    _snwprintf(probe, MAX_PATH * 2, L"%s\\macfs.dll", install_dir);
+    if (!file_exists(probe)) return 0;
+
+    _snwprintf(probe, MAX_PATH * 2, L"%s\\data\\icudtl.dat", install_dir);
+    /* icudtl.dat opsional pada beberapa versi Flutter, abaikan bila tidak ada. */
+    return 1;
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, LPWSTR command_line,
@@ -111,7 +121,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, LPWSTR command_line,
         return 1;
     }
 
-    /* Baca trailer di akhir file. */
+    /* Baca trailer. */
     HANDLE package = CreateFileW(self, GENERIC_READ, FILE_SHARE_READ, NULL,
                                  OPEN_EXISTING, 0, NULL);
     if (package == INVALID_HANDLE_VALUE) {
@@ -141,7 +151,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, LPWSTR command_line,
     memcpy(&payload_offset, trailer, 8);
     memcpy(&payload_size, trailer + 8, 8);
 
-    /* Lokasi instalasi stabil. */
     const wchar_t *local_app_data = _wgetenv(L"LOCALAPPDATA");
     if (local_app_data == NULL || local_app_data[0] == L'\0') {
         launcher_fail(L"LOCALAPPDATA tidak ditemukan.");
@@ -153,14 +162,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, LPWSTR command_line,
     wchar_t exe_path[MAX_PATH * 2];
     _snwprintf(exe_path, MAX_PATH * 2, L"%s\\macdrive_rescue.exe", install_dir);
 
-    /* Sudah terpasang? Langsung jalankan. */
-    if (file_exists(exe_path)) {
+    /* Instalasi lengkap -> langsung jalankan. */
+    if (install_is_complete(install_dir, exe_path)) {
         ShellExecuteW(NULL, L"open", exe_path, NULL, install_dir, SW_SHOWNORMAL);
         return 0;
     }
 
-    /* Ekstrak payload. */
-    SHCreateDirectoryExW(NULL, install_dir, NULL);
+    /* Tidak lengkap / rusak -> ekstrak ulang (timpa). */
+    if (!CreateDirectoryW(install_dir, NULL)) {
+        DWORD error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS) {
+            launcher_fail(L"Tidak bisa membuat folder instalasi.");
+            return 1;
+        }
+    }
 
     wchar_t temp_dir[MAX_PATH];
     wchar_t zip_path[MAX_PATH];
@@ -180,10 +195,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, LPWSTR command_line,
         launcher_fail(L"Gagal mengekstrak paket.");
         return 1;
     }
-    if (!file_exists(exe_path)) {
-        launcher_fail(L"Ekstraksi tidak lengkap (exe tidak ditemukan).");
+
+    /* Verifikasi ulang setelah ekstrak. */
+    if (!install_is_complete(install_dir, exe_path)) {
+        launcher_fail(
+            L"Ekstraksi tidak lengkap (data aplikasi tidak ditemukan).\n\n"
+            L"Hapus folder:\n%LOCALAPPDATA%\\MacDriveRescue\nlalu jalankan "
+            L"kembali file ini.");
         return 1;
     }
+
     ShellExecuteW(NULL, L"open", exe_path, NULL, install_dir, SW_SHOWNORMAL);
     return 0;
 }

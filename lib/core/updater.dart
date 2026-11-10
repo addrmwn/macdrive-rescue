@@ -12,7 +12,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-const appVersion = '2.3.1';
+const appVersion = '2.3.2';
 
 const _repoOwner = 'addrmwn';
 const _repoName = 'macdrive-rescue';
@@ -184,6 +184,23 @@ class Updater {
     if (tar.exitCode != 0) {
       throw UpdateException(
           'Gagal mengekstrak: ${tar.stderr.toString().trim()}');
+    }
+
+    // Verifikasi payload lengkap SEBELUM menimpa instalasi.
+    // Tanpa langkah ini, update yang korup bisa merusak aplikasi
+    // (mis. folder data hilang -> app tidak bisa dibuka).
+    final required = [
+      'macdrive_rescue.exe',
+      'flutter_windows.dll',
+      'data\\app.so',
+      'macfs.dll',
+    ];
+    for (final relative in required) {
+      final probe = File('${extractDir.path}\\$relative');
+      if (!probe.existsSync()) {
+        throw UpdateException(
+            'Paket update tidak lengkap (missing $relative). Update dibatalkan.');
+      }
     }
 
     final script = '''
