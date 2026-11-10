@@ -33,7 +33,7 @@ Future<void> main() async {
     length: drive.partition.length,
     kind: drive.fsKind,
     volumeIndex: drive.volumeIndex,
-    startPath: 'Users/adidarmawan/Documents/LocalMesh',
+    startPaths: const ['Users/adidarmawan/Documents/LocalMesh'],
     options: const TransferOptions(),
   );
   print('scan selesai dalam ${stopwatch.elapsedMilliseconds}ms');

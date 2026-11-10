@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'package:macdrive_rescue/core/discovery.dart';
 import 'package:macdrive_rescue/core/engine.dart';
+import 'package:macdrive_rescue/core/l10n.dart';
 import 'package:macdrive_rescue/core/macfs_ffi.dart';
 import 'package:macdrive_rescue/core/settings.dart';
 import 'package:macdrive_rescue/ui/theme.dart';
@@ -27,7 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<MacDrive> _drives = [];
   MacDrive? _selectedDrive;
-  String? _sourcePath; // relatif terhadap volume ("Users/adi/Documents/LocalMesh")
+  List<String> _sourcePaths = const []; // relatif terhadap volume
   String _sourceLabel = 'Belum ada folder dipilih';
   String _sourceHint = 'Pilih drive, lalu pilih folder sumber';
   bool _isAdmin = false;
@@ -79,6 +80,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _optOverwrite = s.overwrite;
       _optSymlinks = s.symlinks;
       _optColon = s.colonReplacement;
+      L.current = s.language == 'en'
+          ? AppLanguage.english
+          : AppLanguage.indonesian;
     });
     _updateFreeSpace();
   }
@@ -95,6 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
       overwrite: _optOverwrite,
       symlinks: _optSymlinks,
       colonReplacement: _optColon,
+      language: L.current == AppLanguage.english ? 'en' : 'id',
     );
   }
 
@@ -192,7 +197,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final drive = root.substring(0, 2);
       final result = _freeSpaceOf(drive);
       if (result != null) {
-        setState(() => _freeSpace = 'Ruang tersedia di ${drive.toUpperCase()}: ${result}');
+        setState(() => _freeSpace = L.current == AppLanguage.english
+            ? '${_t.freeSpace} on ${drive.toUpperCase()}: ${result}'
+            : '${_t.freeSpace} di ${drive.toUpperCase()}: ${result}');
       }
     } catch (_) {}
   }
@@ -250,13 +257,13 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _busy = true;
       _selectedDrive = null;
-      _sourcePath = null;
+      _sourcePaths = const [];
       _scanResult = null;
       _drives = [];
-      _sourceLabel = 'Belum ada folder dipilih';
-      _sourceHint = 'Pilih drive, lalu pilih folder sumber';
+      _sourceLabel = _t.noSource;
+      _sourceHint = _t.pickSourceHint;
     });
-    _setStatus('Memindai disk fisik...');
+    _setStatus(_t.scanningDisks);
     try {
       final drives = await scanMacDrives();
       if (!mounted) return;
@@ -296,13 +303,13 @@ class _HomeScreenState extends State<HomeScreen> {
   void _selectDrive(MacDrive drive) {
     setState(() {
       _selectedDrive = drive;
-      _sourcePath = null;
+      _sourcePaths = const [];
       _scanResult = null;
       _sourceLabel = drive.volumeName;
-      _sourceHint = 'Seluruh isi volume akan disalin ke folder tujuan';
-      _summary = 'Pilih folder sumber, lalu klik Pindai.';
+      _sourceHint = _t.wholeVolumeHint;
+      _summary = _t.pickAndScan;
     });
-    _setStatus('Drive siap: ${drive.volumeName}');
+    _setStatus('${_t.driveReady} ${drive.volumeName}');
     _log('Drive dibuka: ${drive.volumeName} (${drive.kindLabel})');
   }
 
@@ -316,20 +323,23 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (result == null || !mounted) return;
     setState(() {
-      _sourcePath = result.path.isEmpty ? null : result.path;
-      _sourceLabel = result.path.isEmpty ? drive.volumeName : result.name;
-      if (result.path.isEmpty) {
-        _sourceHint = 'Seluruh isi volume akan disalin ke folder tujuan';
-      } else if (result.isFile) {
-        _sourceHint = 'File ${result.name} akan disalin ke folder tujuan';
+      _sourcePaths = result.paths;
+      if (result.paths.isEmpty) {
+        _sourceLabel = drive.volumeName;
+        _sourceHint = _t.wholeVolumeHint;
+      } else if (result.paths.length == 1) {
+        _sourceLabel = result.names.first;
+        _sourceHint = L.current == AppLanguage.english
+            ? '${result.names.first} will be copied to the destination'
+            : '${result.names.first} akan disalin ke folder tujuan';
       } else {
-        _sourceHint =
-            'Folder ${result.name} akan muncul langsung di dalam folder tujuan';
+        _sourceLabel = '${result.paths.length} ${_t.nItemsSelected}';
+        _sourceHint = result.names.join(', ');
       }
       _scanResult = null;
       _failedFiles.clear();
     });
-    _log('Sumber dipilih: ${result.name}${result.isFile ? ' (file)' : ''}');
+    _log('Sumber dipilih: ${result.names.join(', ')}');
     await _scanSource();
   }
 
@@ -384,9 +394,9 @@ if (\$dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       _scanning = true;
       _progress = 0;
       _progressText = '0%';
-      _summary = 'Menghitung file...';
+      _summary = _t.counting;
     });
-    _setStatus('Menghitung file...');
+    _setStatus(_t.counting);
     try {
 final result = await scanVolume(
         diskNumber: drive.diskNumber,
@@ -394,7 +404,7 @@ final result = await scanVolume(
         length: drive.partition.length,
         kind: drive.fsKind,
         volumeIndex: drive.volumeIndex,
-        startPath: _sourcePath,
+        startPaths: _sourcePaths,
         options: _options(),
       );
       if (!mounted) return;
@@ -404,7 +414,7 @@ final result = await scanVolume(
         _summary =
             '${result.files.length} file Â· ${result.dirs.length} folder Â· ${_humanSize(result.totalBytes)}';
       });
-      _setStatus('Siap menyalin.');
+      _setStatus(_t.ready);
       _log(
         'Siap: ${result.files.length} file, ${result.dirs.length} folder, total ${_humanSize(result.totalBytes)}.',
         level: _LogLevel.ok,
@@ -476,9 +486,9 @@ final result = await scanVolume(
       _speed = '';
       _eta = '';
       _currentFile = '';
-      _summary = isRetry ? 'Mencoba ulang file yang gagal...' : 'Menyalin...';
+      _summary = isRetry ? _t.retryingFailed : _t.copying;
     });
-    _setStatus('Menyalin data...');
+    _setStatus(_t.copying);
     _log('Mulai menyalin ke: $dest');
     _saveSettings();
 
@@ -551,7 +561,7 @@ void onEvent(Map<String, dynamic> event) {
           _failedFiles = failedTasks;
           _lastDestRoot = dest;
         });
-        _setStatus('Transfer selesai.');
+        _setStatus(_t.copyDone);
         _log(
           'Selesai: $copied file tersalin (${_humanSize(bytes)}), $skipped dilewati, $failed gagal.',
           level: _LogLevel.ok,
@@ -604,7 +614,7 @@ void onEvent(Map<String, dynamic> event) {
       if (!mounted) return;
       setState(() => _copying = false);
       _log('Transfer gagal: $e', level: _LogLevel.error);
-      _setStatus('Transfer gagal.');
+      _setStatus(_t.copyFailed);
     }
   }
 
@@ -679,10 +689,10 @@ void onEvent(Map<String, dynamic> event) {
                       color: Colors.white, size: 22),
                 ),
                 const SizedBox(width: 12),
-                const Column(
+                Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'MacDrive Rescue',
                       style: TextStyle(
                         color: AppColors.text,
@@ -691,16 +701,19 @@ void onEvent(Map<String, dynamic> event) {
                         letterSpacing: 0.2,
                       ),
                     ),
-                    SizedBox(height: 1),
+                    const SizedBox(height: 1),
                     Text(
-                      'Salin data drive Mac (APFS / HFS+) ke Windows',
-                      style: TextStyle(color: AppColors.muted, fontSize: 11.5),
+                      _t.appTagline,
+                      style: const TextStyle(
+                          color: AppColors.muted, fontSize: 11.5),
                     ),
                   ],
                 ),
                 const Spacer(),
+                _buildLanguageSelector(),
+                const SizedBox(width: 10),
                 StatusBadge(
-                  text: _isAdmin ? 'Mode Administrator' : 'Tanpa Administrator',
+                  text: _isAdmin ? _t.adminMode : _t.noAdmin,
                   color: _isAdmin ? AppColors.green : AppColors.red,
                   background:
                       _isAdmin ? const Color(0xFF173B26) : const Color(0xFF3B1F1F),
@@ -714,17 +727,53 @@ void onEvent(Map<String, dynamic> event) {
     );
   }
 
+  L get _t => L(L.current);
+
+  Widget _buildLanguageSelector() {
+    return Container(
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: AppColors.cardInner,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<AppLanguage>(
+          value: L.current,
+          isDense: true,
+          dropdownColor: AppColors.cardInner,
+          style: const TextStyle(color: AppColors.text, fontSize: 12),
+          icon: const Icon(Icons.language_rounded,
+              color: AppColors.muted, size: 15),
+          items: const [
+            DropdownMenuItem(
+                value: AppLanguage.indonesian, child: Text('Indonesia')),
+            DropdownMenuItem(
+                value: AppLanguage.english, child: Text('English')),
+          ],
+          onChanged: (v) {
+            if (v != null) {
+              setState(() => L.current = v);
+              _saveSettings();
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildSourceCard(List<MacDrive> usable) {
     return StepCard(
       step: '1',
-      title: 'Pilih data dari drive Mac',
-      subtitle: 'dibaca langsung dari disk — aman, read-only',
+      title: _t.step1Title,
+      subtitle: _t.step1Subtitle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              const FieldLabel('Drive'),
+              FieldLabel(_t.drive),
               const SizedBox(width: 12),
               Expanded(
                 child: Container(
@@ -743,10 +792,10 @@ void onEvent(Map<String, dynamic> event) {
                           : null,
                       hint: Text(
                         _busy
-                            ? 'Memindai disk...'
+                            ? _t.scanningDisks
                             : usable.isEmpty
-                                ? 'Tidak ada drive Mac terdeteksi'
-                                : 'Pilih drive',
+                                ? _t.noMacDrive
+                                : _t.chooseDrive,
                         style: const TextStyle(
                             color: AppColors.muted, fontSize: 13),
                       ),
@@ -771,7 +820,7 @@ void onEvent(Map<String, dynamic> event) {
               ),
               const SizedBox(width: 10),
               SecondaryButton(
-                label: 'Pindai Ulang',
+                label: _t.rescan,
                 icon: Icons.refresh_rounded,
                 onPressed: _busy ? null : _scanDrives,
               ),
@@ -785,7 +834,7 @@ void onEvent(Map<String, dynamic> event) {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const FieldLabel('Folder sumber'),
+                      FieldLabel(_t.sourceFolder),
                       const SizedBox(height: 4),
                       Text(
                         _sourceLabel,
@@ -811,7 +860,7 @@ const SizedBox(width: 12),
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       PrimaryButton(
-                        label: 'Pilih Folder...',
+                        label: _t.chooseItem,
                         icon: Icons.folder_open_rounded,
                         onPressed: (_selectedDrive == null ||
                                 _copying ||
@@ -821,7 +870,7 @@ const SizedBox(width: 12),
                       ),
                       const SizedBox(height: 8),
                       SecondaryButton(
-                        label: 'Seluruh Volume',
+                        label: _t.wholeVolume,
                         icon: Icons.album_rounded,
                         onPressed: (_selectedDrive == null ||
                                 _copying ||
@@ -829,10 +878,9 @@ const SizedBox(width: 12),
                             ? null
                             : () {
                               setState(() {
-                                _sourcePath = null;
+                                _sourcePaths = const [];
                                 _sourceLabel = _selectedDrive!.volumeName;
-                                _sourceHint =
-                                    'Seluruh isi volume akan disalin ke folder tujuan';
+                                _sourceHint = _t.wholeVolumeHint;
                                 _scanResult = null;
                               });
                               _scanSource();
@@ -852,8 +900,8 @@ const SizedBox(width: 12),
   Widget _buildDestinationCard() {
     return StepCard(
       step: '2',
-      title: 'Simpan ke folder Windows',
-      subtitle: 'folder sumber akan muncul di dalam folder ini',
+      title: _t.step2Title,
+      subtitle: _t.step2Subtitle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -886,7 +934,7 @@ const SizedBox(width: 12),
               ),
               const SizedBox(width: 10),
               SecondaryButton(
-                label: 'Telusuri...',
+                label: _t.browse,
                 icon: Icons.folder_rounded,
                 onPressed: _copying ? null : _pickDestination,
               ),
@@ -907,8 +955,8 @@ const SizedBox(width: 12),
   Widget _buildOptionsCard() {
     return StepCard(
       step: '3',
-      title: 'Opsi penyalinan',
-      subtitle: 'default sudah aman untuk kebanyakan orang',
+      title: _t.step3Title,
+      subtitle: _t.step3Subtitle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -916,15 +964,15 @@ const SizedBox(width: 12),
             spacing: 18,
             runSpacing: 6,
             children: [
-              _check('Lewati file sistem Mac (.DS_Store, ._*)', _optSkipSystem,
+              _check(_t.skipSystem, _optSkipSystem,
                   (v) => setState(() => _optSkipSystem = v)),
-              _check('Lewati folder build/cache', _optSkipBuild,
+              _check(_t.skipBuild, _optSkipBuild,
                   (v) => setState(() => _optSkipBuild = v)),
-              _check('Lewati .app/.framework', _optSkipApps,
+              _check(_t.skipApps, _optSkipApps,
                   (v) => setState(() => _optSkipApps = v)),
-              _check('Verifikasi hash', _optVerify,
+              _check(_t.verifyHash, _optVerify,
                   (v) => setState(() => _optVerify = v)),
-              _check('Pertahankan tanggal', _optPreserveTimes,
+              _check(_t.preserveTimes, _optPreserveTimes,
                   (v) => setState(() => _optPreserveTimes = v)),
             ],
           ),
@@ -935,13 +983,13 @@ const SizedBox(width: 12),
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Row(mainAxisSize: MainAxisSize.min, children: [
-                const FieldLabel('Jika file sudah ada'),
+                FieldLabel(_t.ifExists),
                 const SizedBox(width: 8),
                 _dropdown(_optOverwrite, const ['skip', 'overwrite', 'rename'],
                     (v) => setState(() => _optOverwrite = v)),
               ]),
               Row(mainAxisSize: MainAxisSize.min, children: [
-                const FieldLabel("Karakter ':' jadi"),
+                FieldLabel(_t.colonChar),
                 const SizedBox(width: 8),
                 _dropdown(
                     _optColon,
@@ -950,14 +998,14 @@ const SizedBox(width: 12),
                     width: 64),
               ]),
               Row(mainAxisSize: MainAxisSize.min, children: [
-                const FieldLabel('Symlink'),
+                FieldLabel(_t.symlink),
                 const SizedBox(width: 8),
                 _dropdown(_optSymlinks, const ['skip', 'follow'],
                     (v) => setState(() => _optSymlinks = v)),
               ]),
-              _check('Lewati file tersembunyi', _optSkipHidden,
+              _check(_t.skipHidden, _optSkipHidden,
                   (v) => setState(() => _optSkipHidden = v)),
-              _check('Simulasi saja', _optDryRun,
+              _check(_t.dryRun, _optDryRun,
                   (v) => setState(() => _optDryRun = v)),
             ],
           ),
@@ -1023,7 +1071,7 @@ const SizedBox(width: 12),
     return Row(
       children: [
         SecondaryButton(
-          label: 'Pindai Sumber',
+          label: _t.scanSource,
           icon: Icons.search_rounded,
           onPressed: (_selectedDrive == null || _scanning || _copying)
               ? null
@@ -1031,7 +1079,7 @@ const SizedBox(width: 12),
         ),
         const SizedBox(width: 8),
         PrimaryButton(
-          label: _copying ? 'Menyalin...' : 'Mulai Transfer',
+          label: _copying ? _t.copyingEllipsis : _t.startTransfer,
           icon: Icons.play_arrow_rounded,
           onPressed: (_scanResult == null || _scanning || _copying)
               ? null
@@ -1040,14 +1088,14 @@ const SizedBox(width: 12),
         if (_failedFiles.isNotEmpty && !_copying && !_scanning) ...[
           const SizedBox(width: 8),
           SecondaryButton(
-            label: 'Coba Lagi yang Gagal (${_failedFiles.length})',
+            label: '${_t.retryFailed} (${_failedFiles.length})',
             icon: Icons.replay_rounded,
             onPressed: _retryFailed,
           ),
         ],
         const SizedBox(width: 8),
         SecondaryButton(
-          label: 'Buka Folder Tujuan',
+          label: _t.openDest,
           icon: Icons.folder_special_rounded,
           onPressed: _openDestination,
         ),
@@ -1145,11 +1193,11 @@ const SizedBox(width: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(14, 10, 14, 4),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
             child: Text(
-              'Aktivitas',
-              style: TextStyle(
+              _t.activity,
+              style: const TextStyle(
                 color: AppColors.text,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
@@ -1206,7 +1254,7 @@ const SizedBox(width: 12),
           ),
           const Spacer(),
           const Text(
-            'v2.0',
+            'v2.1',
             style: TextStyle(color: Color(0xFF4A4F63), fontSize: 10.5),
           ),
         ],
@@ -1250,10 +1298,9 @@ class _LogEntry {
 // ---------------------------------------------------------------------------
 
 class FolderSelection {
-  final String path; // relatif terhadap volume ("" = root)
-  final String name;
-  final bool isFile;
-  const FolderSelection(this.path, this.name, {this.isFile = false});
+  final List<String> paths; // relatif terhadap volume ("" = root)
+  final List<String> names;
+  const FolderSelection(this.paths, this.names);
 }
 
 class _FolderBrowserDialog extends StatefulWidget {
@@ -1289,6 +1336,7 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
   _FolderBrowserNode? _root;
   String? _error;
   _FolderBrowserNode? _selected;
+  final _checked = <String, _FolderBrowserNode>{};
 
   @override
   void initState() {
@@ -1421,7 +1469,7 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Pilih file atau folder di ${widget.drive.volumeName}',
+                '${L(L.current).pickFileOrFolder} ${widget.drive.volumeName}',
                 style: const TextStyle(
                   color: AppColors.text,
                   fontSize: 16,
@@ -1429,9 +1477,9 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
                 ),
               ),
               const SizedBox(height: 3),
-              const Text(
-                'Klik folder untuk membuka, atau tandai file/folder lalu klik tombol di kanan bawah.',
-                style: TextStyle(color: AppColors.muted, fontSize: 11.5),
+              Text(
+                L(L.current).browserHint,
+                style: const TextStyle(color: AppColors.muted, fontSize: 11.5),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1446,7 +1494,7 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
                           child: Padding(
                             padding: const EdgeInsets.all(20),
                             child: Text(
-                              'Gagal membuka volume:\n$_error',
+                              '${L(L.current).failOpenVolume}\n$_error',
                               style: const TextStyle(
                                   color: AppColors.red, fontSize: 12.5),
                             ),
@@ -1464,36 +1512,39 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
                 children: [
                   Expanded(
                     child: Text(
-                      _selected == null
-                          ? ''
-                          : 'Dipilih: ${_selected!.path.isEmpty ? widget.drive.volumeName : _selected!.name}${_selected!.isDir ? '' : ' (file)'}',
+                      _checked.isEmpty
+                          ? L(L.current).checkToCopy
+                          : '${_checked.length} item dipilih: '
+                              '${_checked.values.map((n) => n.name).take(3).join(', ')}'
+                              '${_checked.length > 3 ? ', ...' : ''}',
                       style: const TextStyle(
                           color: AppColors.muted, fontSize: 12),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   SecondaryButton(
-                    label: 'Batal',
+                    label: L(L.current).cancel,
                     onPressed: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 8),
                   PrimaryButton(
-                    label: _selected?.isDir == false
-                        ? 'Salin File Ini'
-                        : 'Salin Folder Ini',
+                    label: _checked.isEmpty
+                        ? L(L.current).saveThisFolder
+                        : '${L(L.current).saveItemCount} ${_checked.length}',
                     icon: Icons.check_rounded,
-                    onPressed: _selected == null
-                        ? null
-                        : () => Navigator.pop(
-                              context,
-                              FolderSelection(
-                                _selected!.path,
-                                _selected!.path.isEmpty
-                                    ? widget.drive.volumeName
-                                    : _selected!.name,
-                                isFile: !_selected!.isDir,
-                              ),
-                            ),
+                    onPressed: () {
+                      final paths = _checked.keys.toList();
+                      final names =
+                          _checked.values.map((n) => n.name).toList();
+                      if (paths.isEmpty) {
+                        // Default: seluruh volume.
+                        Navigator.pop(
+                            context, const FolderSelection([], []));
+                        return;
+                      }
+                      Navigator.pop(
+                          context, FolderSelection(paths, names));
+                    },
                   ),
                 ],
               ),
@@ -1523,19 +1574,26 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
   }
 
   Widget _buildRow(_FolderBrowserNode node, int depth) {
-    final isSelected = _selected == node;
+    final isChecked = _checked.containsKey(node.path);
     return InkWell(
-      onTap: () => setState(() => _selected = node),
+      onTap: () => setState(() {
+        if (isChecked) {
+          _checked.remove(node.path);
+        } else {
+          _checked[node.path] = node;
+        }
+        _selected = node;
+      }),
       onDoubleTap: node.isDir ? () => _toggle(node) : null,
       child: Container(
-        color: isSelected
-            ? AppColors.accentDim.withValues(alpha: 0.45)
+        color: isChecked
+            ? AppColors.accentDim.withValues(alpha: 0.35)
             : Colors.transparent,
         padding: EdgeInsets.only(
-          left: 10.0 + depth * 22,
+          left: 8.0 + depth * 22,
           right: 12,
-          top: 7,
-          bottom: 7,
+          top: 6,
+          bottom: 6,
         ),
         child: Row(
           children: [
@@ -1555,6 +1613,26 @@ class _FolderBrowserDialogState extends State<_FolderBrowserDialog> {
                     )
                   : const SizedBox.shrink(),
             ),
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: Checkbox(
+                value: isChecked,
+                onChanged: (_) => setState(() {
+                  if (isChecked) {
+                    _checked.remove(node.path);
+                  } else {
+                    _checked[node.path] = node;
+                  }
+                  _selected = node;
+                }),
+                activeColor: AppColors.accent,
+                side: const BorderSide(color: AppColors.muted, width: 1.3),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+            const SizedBox(width: 4),
             Icon(
               node.isDir ? Icons.folder_rounded : Icons.insert_drive_file_outlined,
               color: node.isDir ? const Color(0xFFF0B429) : AppColors.muted,

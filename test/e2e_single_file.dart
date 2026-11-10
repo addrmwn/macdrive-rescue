@@ -22,7 +22,7 @@ Future<void> main() async {
     length: drive.partition.length,
     kind: drive.fsKind,
     volumeIndex: drive.volumeIndex,
-    startPath: filePath,
+    startPaths: const [filePath],
     options: const TransferOptions(),
   );
   print('files: ${scan.files.length}, dirs: ${scan.dirs.length}, bytes: ${scan.totalBytes}');

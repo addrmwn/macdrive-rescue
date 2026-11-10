@@ -161,13 +161,16 @@ bool _shouldSkip(String name, bool isDir, TransferOptions opts) {
 // ---------------------------------------------------------------------------
 
 /// Memindai volume sumber dan mengembalikan daftar tugas.
+///
+/// [startPaths] boleh berisi beberapa path relatif terhadap volume. Setiap
+/// item bisa berupa folder atau file. Kosong = seluruh volume.
 Future<ScanResult> scanVolume({
   required int diskNumber,
   required int offset,
   required int length,
   required int kind,
   required int volumeIndex,
-  String? startPath,
+  List<String> startPaths = const [],
   required TransferOptions options,
   void Function(int files, int bytes)? onProgress,
   bool Function()? isCancelled,
@@ -178,7 +181,7 @@ Future<ScanResult> scanVolume({
         length: length,
         kind: kind,
         volumeIndex: volumeIndex,
-        startPath: startPath,
+        startPaths: startPaths,
         options: _OptionsDto.from(options),
       )));
   return parseScanResult(raw);
@@ -190,7 +193,7 @@ class _ScanMessage {
   final int length;
   final int kind;
   final int volumeIndex;
-  final String? startPath;
+  final List<String> startPaths;
   final _OptionsDto options;
 
   _ScanMessage({
@@ -199,7 +202,7 @@ class _ScanMessage {
     required this.length,
     required this.kind,
     required this.volumeIndex,
-    required this.startPath,
+    required this.startPaths,
     required this.options,
   });
 }
@@ -279,21 +282,7 @@ Future<Map<String, dynamic>> _scanWorker(_ScanMessage msg) async {
   var skippedDirs = 0;
 
 // Entry root / start.
-  int rootId;
-  String? startName;
-  var startIsFile = false;
-  if (msg.startPath != null && msg.startPath!.isNotEmpty) {
-    rootId = _openPath(volume, msg.startPath!);
-    if (rootId == 0) {
-      volume.close();
-      throw MacFsException('File/folder tidak ditemukan: ${msg.startPath}');
-    }
-    startName = msg.startPath!.split('/').last;
-    final mode = volume.entryMode(rootId);
-    startIsFile = (mode & sIFMT) != sIFDIR;
-  } else {
-    rootId = volume.rootId();
-  }
+  final startPaths = msg.startPaths.where((p) => p.isNotEmpty).toList();
 
   void walk(int dirId, List<String> rel, List<String> dest) {
     final childCount = volume.entryCount(dirId);
@@ -339,27 +328,44 @@ Future<Map<String, dynamic>> _scanWorker(_ScanMessage msg) async {
     }
   }
 
-final initialRel = <String>[];
-  final initialDest = <String>[];
-  if (startName != null && startIsFile) {
-    // Sumber berupa file tunggal: salin file itu saja ke folder tujuan.
-    final fullRel =
-        msg.startPath!.split('/').where((p) => p.isNotEmpty).toList();
-    final safe = sanitizeComponent(startName,
-        colonReplacement: options.colonReplacement);
-    files.add(FileTask(fullRel, [safe], volume.entrySize(rootId)));
-    totalBytes += volume.entrySize(rootId);
-  } else if (startName != null) {
-    // relParts = path lengkap dari root volume (untuk membuka file saat copy).
-    initialRel.addAll(
-        msg.startPath!.split('/').where((p) => p.isNotEmpty).toList());
-    // destParts = hanya nama folder awal (jadi root di tujuan).
-    initialDest.add(sanitizeComponent(startName,
-        colonReplacement: options.colonReplacement));
-    dirs.add(DirTask(initialRel, initialDest, volume.entryMtimeNs(rootId)));
-    walk(rootId, initialRel, initialDest);
+/// Menambahkan satu sumber (file atau folder) ke daftar tugas.
+  /// `topTaken` memastikan nama unik di level teratas folder tujuan.
+  void addSource(String path, Set<String> topTaken) {
+    final id = _openPath(volume, path);
+    if (id == 0) {
+      unreadable.add(path + ' (tidak ditemukan)');
+      return;
+    }
+    try {
+      final parts = path.split('/').where((p) => p.isNotEmpty).toList();
+      final name = parts.isEmpty ? volume.entryName(id) : parts.last;
+      final safe = uniqueName(
+        sanitizeComponent(name, colonReplacement: options.colonReplacement),
+        topTaken,
+      );
+      final mode = volume.entryMode(id);
+      final isDir = (mode & sIFMT) == sIFDIR;
+      if (isDir) {
+        dirs.add(DirTask(parts, [safe], volume.entryMtimeNs(id)));
+        walk(id, parts, [safe]);
+      } else {
+        final size = volume.entrySize(id);
+        files.add(FileTask(parts, [safe], size));
+        totalBytes += size;
+      }
+    } finally {
+      volume.release(id);
+    }
+  }
+
+  final topTaken = <String>{};
+  if (startPaths.isEmpty) {
+    // Seluruh isi volume.
+    walk(volume.rootId(), const [], const []);
   } else {
-    walk(rootId, initialRel, initialDest);
+    for (final path in startPaths) {
+      addSource(path, topTaken);
+    }
   }
   volume.close();
 

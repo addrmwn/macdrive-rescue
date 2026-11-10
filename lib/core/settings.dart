@@ -16,6 +16,7 @@ class SavedSettings {
   final String overwrite;
   final String symlinks;
   final String colonReplacement;
+  final String language;
 
   const SavedSettings({
     this.destPath,
@@ -28,6 +29,7 @@ class SavedSettings {
     this.overwrite = 'skip',
     this.symlinks = 'skip',
     this.colonReplacement = '-',
+    this.language = 'id',
   });
 
   static const _keyDest = 'dest_path';
@@ -40,6 +42,7 @@ class SavedSettings {
   static const _keyOverwrite = 'overwrite';
   static const _keySymlinks = 'symlinks';
   static const _keyColon = 'colon';
+  static const _keyLanguage = 'language';
 
   static Future<SavedSettings> load() async {
     try {
@@ -57,6 +60,7 @@ class SavedSettings {
         overwrite: prefs.getString(_keyOverwrite) ?? 'skip',
         symlinks: prefs.getString(_keySymlinks) ?? 'skip',
         colonReplacement: prefs.getString(_keyColon) ?? '-',
+        language: prefs.getString(_keyLanguage) ?? 'id',
       );
     } catch (_) {
       final defaultDest =
@@ -76,6 +80,7 @@ class SavedSettings {
     required String overwrite,
     required String symlinks,
     required String colonReplacement,
+    String? language,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -91,6 +96,9 @@ class SavedSettings {
       await prefs.setString(_keyOverwrite, overwrite);
       await prefs.setString(_keySymlinks, symlinks);
       await prefs.setString(_keyColon, colonReplacement);
+      if (language != null) {
+        await prefs.setString(_keyLanguage, language);
+      }
     } catch (_) {}
   }
 }
