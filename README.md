@@ -34,6 +34,22 @@ Built with **Flutter** and **Dart FFI** to native C libraries (libfsapfs, libfsh
 - Flutter UI talks to the DLL via `dart:ffi`.
 - All heavy work (scan & copy) runs on **separate isolates** so the UI stays responsive.
 
+## Important: before installing MacDrive
+
+**Do not keep MacDrive installed alongside this app.** When MacDrive 11 is installed it changes
+the GPT partition type of your NTFS data drives to "Apple HFS+". After uninstalling MacDrive the
+partition type is **not** restored, so those drives lose their letter and become unreadable
+(e.g. `GAMES 2` disappearing from Explorer).
+
+**Recovery if it happens** (run in elevated PowerShell):
+```powershell
+# Restore GPT type to "Basic Data" (adjust DiskNumber/PartitionNumber)
+Set-Partition -DiskNumber 1 -PartitionNumber 2 -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'
+# Re-assign drive letter
+Set-Partition -DiskNumber 1 -PartitionNumber 2 -NewDriveLetter E
+```
+Your data is not lost — only the partition metadata is wrong.
+
 ## Features
 
 - Auto-detects every APFS/HFS+ volume across all physical disks (including all logical volumes inside an APFS container).
@@ -59,8 +75,6 @@ Built with **Flutter** and **Dart FFI** to native C libraries (libfsapfs, libfsh
 - **Auto-update**: checks GitHub Releases on startup (silent) and on click of the version
   in the status bar. One click on **Update Now** downloads, installs, and relaunches
   the new version automatically.
-- **Mount as a drive** (MacDrive-like): show a Mac volume as a drive letter in Windows
-  Explorer (read-only). Requires [WinFsp](https://winfsp.dev) (free, open source).
 - **Unlock encrypted APFS** (FileVault): password prompt for encrypted volumes.
 - **Disk info panel**: volume name, filesystem, partition size, encryption status.
 - **Auto UAC elevation** — the app requests Administrator on launch (required for raw disk access).
@@ -223,6 +237,22 @@ Dibangun dengan **Flutter** dan **Dart FFI** ke library native C (libfsapfs, lib
 - **Flutter UI** berkomunikasi dengan DLL melalui `dart:ffi`.
 - Semua operasi berat (scan & copy) berjalan di **isolate terpisah** agar UI tetap responsif.
 
+## Penting: sebelum memasang MacDrive
+
+**Jangan biarkan MacDrive terpasang bersama aplikasi ini.** Saat MacDrive 11 terpasang, ia
+mengubah tipe partisi GPT drive data NTFS Anda menjadi "Apple HFS+". Setelah MacDrive
+di-uninstall, tipe partisi tersebut **tidak** dikembalikan, sehingga drive kehilangan huruf
+dan tidak bisa dibaca (mis. `GAMES 2` hilang dari Explorer).
+
+**Cara memulihkan bila terjadi** (jalankan di PowerShell elevated):
+```powershell
+# Kembalikan tipe GPT ke "Basic Data" (sesuaikan DiskNumber/PartitionNumber)
+Set-Partition -DiskNumber 1 -PartitionNumber 2 -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'
+# Pasang kembali huruf drive
+Set-Partition -DiskNumber 1 -PartitionNumber 2 -NewDriveLetter E
+```
+Data Anda tidak hilang — hanya metadata partisinya yang salah.
+
 ## Fitur
 
 - Deteksi otomatis semua volume APFS/HFS+ di seluruh disk fisik (termasuk semua volume logis dalam container APFS).
@@ -248,9 +278,6 @@ Dibangun dengan **Flutter** dan **Dart FFI** ke library native C (libfsapfs, lib
 - **Auto-update**: memeriksa GitHub Releases saat startup (senyap) dan saat versi
   di status bar diklik. Satu klik **Update Sekarang** akan mengunduh, memasang,
   lalu membuka ulang aplikasi dengan versi terbaru secara otomatis.
-- **Mount sebagai drive** (seperti MacDrive): menampilkan volume Mac sebagai huruf
-  drive di Windows Explorer (read-only). Memerlukan [WinFsp](https://winfsp.dev)
-  (gratis, open source).
 - **Buka APFS terenkripsi** (FileVault): dialog password untuk volume terenkripsi.
 - **Panel info disk**: nama volume, filesystem, ukuran partisi, status enkripsi.
 - **Auto-elevasi UAC** — aplikasi meminta hak Administrator saat dijalankan (wajib untuk akses raw disk).

@@ -140,17 +140,6 @@ class L {
 
   // ---------------------------------------------------------------- mount & info
   String get diskInfo => _t('Info Disk', 'Disk Info');
-  String get mountAsDrive => _t('Mount sebagai Drive', 'Mount as Drive');
-  String get unmountDrive => _t('Lepas Mount', 'Unmount');
-  String get mountedAt => _t('Ter-mount di', 'Mounted at');
-  String get mountNeedsWinFsp => _t(
-      'WinFsp belum terpasang. Fitur mount memerlukan WinFsp (gratis, open source).',
-      'WinFsp is not installed. The mount feature requires WinFsp (free, open source).');
-  String get downloadWinFsp => _t('Buka winfsp.dev', 'Open winfsp.dev');
-  String get mountFailed => _t('Gagal mount', 'Mount failed');
-  String get mountReadOnlyNote => _t(
-      'Mount bersifat read-only — aman untuk data.',
-      'Mount is read-only — safe for your data.');
   String get volumeLabel => _t('Volume', 'Volume');
   String get filesystemLabel => _t('Filesystem', 'Filesystem');
   String get capacityLabel => _t('Kapasitas partisi', 'Partition size');
@@ -166,22 +155,6 @@ class L {
   String get unlockFailed => _t('Password salah atau volume bukan APFS terenkripsi',
       'Wrong password or not an encrypted APFS volume');
   String get unlockOk => _t('Volume berhasil dibuka.', 'Volume unlocked.');
-  String get chooseLetter => _t('Pilih huruf drive', 'Choose drive letter');
-  String get mountTroubleshoot => _t(
-      'Mount memerlukan driver WinFsp yang aktif. Jika gagal: buka winfsp.dev, '
-      'pasang ulang, lalu restart PC.\n\n'
-      'Belum berhasil? Tidak masalah - gunakan tombol "Mulai Transfer" untuk '
-      'menyalin data langsung (cara ini tidak butuh WinFsp).',
-      'Mounting needs an active WinFsp driver. If it fails: visit winfsp.dev, '
-      'reinstall, then restart your PC.\n\n'
-      'Still not working? No problem - use "Start Transfer" to copy your data '
-      'directly (this works without WinFsp).');
-  String get mountOptionalNote => _t(
-      'Mount hanya opsional. Menyalin data tetap berfungsi penuh tanpa WinFsp.',
-      'Mount is optional. Copying data works fully without WinFsp.');
-  String get mountDriveLetterInUse => _t(
-      'Huruf drive sudah dipakai — pilih huruf lain.',
-      'Drive letter already in use — choose another letter.');
 
   // ---------------------------------------------------------------- update
   String get checkUpdate => _t('Cek Update', 'Check for updates');

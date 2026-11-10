@@ -6,150 +6,25 @@ import 'package:macdrive_rescue/core/discovery.dart';
 import 'package:macdrive_rescue/core/l10n.dart';
 import 'package:macdrive_rescue/core/macfs_ffi.dart';
 import 'package:macdrive_rescue/ui/theme.dart';
-import 'package:macdrive_rescue/ui/widgets.dart';
 
-/// Dialog info disk/volume + tombol mount.
-class DiskInfoDialog extends StatefulWidget {
+/// Dialog info disk/volume (tanpa fitur mount).
+class DiskInfoDialog extends StatelessWidget {
   final MacDrive drive;
   const DiskInfoDialog({super.key, required this.drive});
 
   @override
-  State<DiskInfoDialog> createState() => _DiskInfoDialogState();
-}
-
-class _DiskInfoDialogState extends State<DiskInfoDialog> {
-  MacMount? _mount;
-  bool _busy = false;
-  String? _error;
-
-  L get _t => L(L.current);
-
-  @override
-  void dispose() {
-    _mount?.unmount();
-    super.dispose();
-  }
-
-  /// Mount dengan huruf drive OTOMATIS (disarankan).
-  /// WinFsp memilih huruf sendiri dari Z: ke bawah, sehingga tidak ada
-  /// kemungkinan bentrok dengan huruf yang sudah dipakai.
-  Future<void> _mountAutomatic() async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final drive = widget.drive;
-      final mount = MacMount.mount(
-        diskNumber: drive.diskNumber,
-        offset: drive.partition.start,
-        length: drive.partition.length,
-        kind: drive.fsKind,
-        volumeIndex: drive.volumeIndex,
-        mountPoint: '', // kosong = otomatis
-      );
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _mount = mount;
-        _error = mount == null
-            ? (MacMount.lastError ?? _t.mountFailed)
-            : null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = e.toString();
-      });
-    }
-  }
-
-  /// Mount manual: pengguna memilih huruf drive sendiri.
-  Future<void> _chooseAndMount() async {
-    final letters = <String>[];
-    for (var c = 'M'.codeUnitAt(0); c <= 'Z'.codeUnitAt(0); c++) {
-      final letter = String.fromCharCode(c);
-      try {
-        if (await Directory('$letter:\\').exists()) continue;
-      } catch (_) {}
-      letters.add(letter);
-    }
-    if (letters.isEmpty || !mounted) return;
-
-    final letter = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_t.chooseLetter),
-        content: SizedBox(
-          width: 320,
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: letters
-                .take(12)
-                .map((l) => OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx, l),
-                      child: Text('$l:'),
-                    ))
-                .toList(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(_t.cancel),
-          ),
-        ],
-      ),
-    );
-    if (letter == null || !mounted) return;
-    await _mountAt(letter);
-  }
-
-  Future<void> _mountAt(String letter) async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final drive = widget.drive;
-      final mount = MacMount.mount(
-        diskNumber: drive.diskNumber,
-        offset: drive.partition.start,
-        length: drive.partition.length,
-        kind: drive.fsKind,
-        volumeIndex: drive.volumeIndex,
-        mountPoint: '$letter:',
-      );
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _mount = mount;
-        _error = mount == null ? (MacMount.lastError ?? _t.mountFailed) : null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = e.toString();
-      });
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final drive = widget.drive;
-    final winfsp = WinFspChecker.available;
+    final t = L(L.current);
 
     return AlertDialog(
       title: Row(
         children: [
           const Icon(Icons.storage_rounded, color: AppColors.accent, size: 22),
           const SizedBox(width: 10),
-          Text(_t.diskInfo,
-              style:
-                  const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+          Text(
+            t.diskInfo,
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
         ],
       ),
       content: SizedBox(
@@ -158,107 +33,23 @@ class _DiskInfoDialogState extends State<DiskInfoDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _row(_t.volumeLabel, drive.volumeName, highlight: true),
-            _row(_t.filesystemLabel, drive.kindLabel),
-            _row(_t.capacityLabel,
-                '${drive.partition.sizeGb.toStringAsFixed(1)} GB'),
+            _row(t.volumeLabel, drive.volumeName, highlight: true),
+            _row(t.filesystemLabel, drive.kindLabel),
+            _row(
+              t.capacityLabel,
+              '${drive.partition.sizeGb.toStringAsFixed(1)} GB',
+            ),
             if (drive.mountLetter != null)
               _row('Windows', '${drive.mountLetter}:'),
-            _row(_t.encryptedLabel, _t.notEncrypted),
-            if (_mount != null && _mount!.isActive) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF173B26),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.check_circle_rounded,
-                        color: AppColors.green, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${_t.mountedAt}: ${_mount!.mountPoint}  '
-                        '(${_t.mountReadOnlyNote})',
-                        style: const TextStyle(
-                            color: AppColors.green, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!,
-                  style: const TextStyle(color: AppColors.red, fontSize: 12)),
-              const SizedBox(height: 6),
-              Text(_t.mountTroubleshoot,
-                  style: const TextStyle(
-                      color: AppColors.muted, fontSize: 11, height: 1.4)),
-            ],
-            if (!winfsp) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF3B2F1F),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _t.mountNeedsWinFsp,
-                  style: const TextStyle(
-                      color: AppColors.yellow, fontSize: 12),
-                ),
-              ),
-            ],
+            _row(t.encryptedLabel, t.notEncrypted),
           ],
         ),
       ),
       actions: [
-        if (!winfsp)
-          TextButton.icon(
-            onPressed: () {
-              Process.start('cmd', ['/c', 'start', '', 'https://winfsp.dev/rel/'],
-                  mode: ProcessStartMode.detached, runInShell: true);
-            },
-            icon: const Icon(Icons.open_in_new_rounded, size: 15),
-            label: const Text('winfsp.dev'),
-          ),
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: Text(_t.cancel),
+          child: Text(t.cancel),
         ),
-        if (_mount != null && _mount!.isActive)
-          OutlinedButton.icon(
-            onPressed: () {
-              setState(() {
-                _mount?.unmount();
-                _mount = null;
-              });
-            },
-            icon: const Icon(Icons.link_off_rounded, size: 16),
-            label: Text(_t.unmountDrive),
-          )
-        else ...[
-          TextButton(
-            onPressed: (_busy || !winfsp) ? null : _chooseAndMount,
-            child: Text(_t.chooseLetter),
-          ),
-          FilledButton.icon(
-            onPressed: (_busy || !winfsp) ? null : _mountAutomatic,
-            icon: _busy
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.drive_file_move_rounded, size: 16),
-            label: Text(_t.mountAsDrive),
-          ),
-        ],
       ],
     );
   }
@@ -270,9 +61,10 @@ class _DiskInfoDialogState extends State<DiskInfoDialog> {
         children: [
           SizedBox(
             width: 140,
-            child: Text(label,
-                style:
-                    const TextStyle(color: AppColors.muted, fontSize: 12.5)),
+            child: Text(
+              label,
+              style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+            ),
           ),
           Expanded(
             child: Text(
@@ -354,9 +146,10 @@ class _UnlockDialogState extends State<UnlockDialog> {
         children: [
           const Icon(Icons.lock_rounded, color: AppColors.accent, size: 22),
           const SizedBox(width: 10),
-          Text(_t.unlockTitle,
-              style:
-                  const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+          Text(
+            _t.unlockTitle,
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
         ],
       ),
       content: SizedBox(
@@ -365,9 +158,14 @@ class _UnlockDialogState extends State<UnlockDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_t.unlockHint,
-                style: const TextStyle(
-                    color: AppColors.muted, fontSize: 12.5, height: 1.4)),
+            Text(
+              _t.unlockHint,
+              style: const TextStyle(
+                color: AppColors.muted,
+                fontSize: 12.5,
+                height: 1.4,
+              ),
+            ),
             const SizedBox(height: 14),
             TextField(
               controller: _controller,
@@ -382,7 +180,9 @@ class _UnlockDialogState extends State<UnlockDialog> {
                 fillColor: AppColors.cardInner,
                 suffixIcon: IconButton(
                   icon: Icon(
-                    _obscure ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                    _obscure
+                        ? Icons.visibility_rounded
+                        : Icons.visibility_off_rounded,
                     color: AppColors.muted,
                     size: 18,
                   ),
@@ -404,8 +204,10 @@ class _UnlockDialogState extends State<UnlockDialog> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!,
-                  style: const TextStyle(color: AppColors.red, fontSize: 12)),
+              Text(
+                _error!,
+                style: const TextStyle(color: AppColors.red, fontSize: 12),
+              ),
             ],
           ],
         ),
