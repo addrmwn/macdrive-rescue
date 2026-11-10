@@ -62,6 +62,22 @@ typedef _ReadNative = Int64 Function(Pointer<Void> ctx, Int64 id,
 typedef _ReadDart = int Function(Pointer<Void> ctx, int id,
     Pointer<Void> buffer, int size, int offset);
 
+// Mount (WinFsp) - dynamic loading, tidak wajib ada.
+typedef _WinFspAvailableNative = Int32 Function();
+typedef _WinFspAvailableDart = int Function();
+typedef _MountVolumeNative = Pointer<Void> Function(
+    Int32 diskNumber, Uint64 offset, Uint64 length, Int32 kind,
+    Int32 volumeIndex, Pointer<Utf8> mountPoint);
+typedef _MountVolumeDart = Pointer<Void> Function(
+    int diskNumber, int offset, int length, int kind, int volumeIndex,
+    Pointer<Utf8> mountPoint);
+typedef _MountHandleNative = Void Function(Pointer<Void> handle);
+typedef _MountHandleDart = void Function(Pointer<Void> handle);
+typedef _MountStrNative = Pointer<Utf8> Function(Pointer<Void> handle);
+typedef _MountStrDart = Pointer<Utf8> Function(Pointer<Void> handle);
+typedef _MountIntNative = Int32 Function(Pointer<Void> handle);
+typedef _MountIntDart = int Function(Pointer<Void> handle);
+
 // Fungsi partisi (global, tidak butuh ctx).
 typedef _DiskCountNative = Int32 Function();
 typedef _DiskCountDart = int Function();
@@ -163,6 +179,13 @@ class MacFsLibrary {
   static late final _IdStrDart _entryLinkTarget;
   static late final _ReadDart _readAt;
 
+  static late final _WinFspAvailableDart _winfspAvailable;
+  static late final _MountVolumeDart _mountVolume;
+  static late final _MountHandleDart _unmount;
+  static late final _MountStrDart _mountError;
+  static late final _MountStrDart _mountPoint;
+  static late final _MountIntDart _mountIsActive;
+
   static late final _DiskCountDart _diskCount;
   static late final _CanAccessDart _canAccess;
   static late final _PartCountDart _partCount;
@@ -217,6 +240,19 @@ class MacFsLibrary {
     _entryAtime = lib.lookupFunction<_IdI64Native, _IdI64Dart>('macfs_entry_atime_ns');
     _entryLinkTarget = lib.lookupFunction<_IdStrNative, _IdStrDart>('macfs_entry_link_target');
     _readAt = lib.lookupFunction<_ReadNative, _ReadDart>('macfs_read_at');
+    _winfspAvailable = lib.lookupFunction<_WinFspAvailableNative,
+        _WinFspAvailableDart>('macfs_winfsp_available');
+    _mountVolume = lib.lookupFunction<_MountVolumeNative, _MountVolumeDart>(
+        'macfs_mount_volume');
+    _unmount = lib.lookupFunction<_MountHandleNative, _MountHandleDart>(
+        'macfs_unmount');
+    _mountError = lib.lookupFunction<_MountStrNative, _MountStrDart>(
+        'macfs_mount_error');
+    _mountPoint = lib.lookupFunction<_MountStrNative, _MountStrDart>(
+        'macfs_mount_point');
+    _mountIsActive = lib.lookupFunction<_MountIntNative, _MountIntDart>(
+        'macfs_mount_is_active');
+
     _diskCount = lib.lookupFunction<_DiskCountNative, _DiskCountDart>('macfs_disk_count');
     _canAccess = lib.lookupFunction<_CanAccessNative, _CanAccessDart>('macfs_can_access_disks');
     _partCount = lib.lookupFunction<_PartCountNative, _PartCountDart>('macfs_disk_partition_count');
@@ -441,3 +477,80 @@ class MacVolume {
   }
 }
 
+/// Handle mount WinFsp: volume Mac tampil sebagai huruf drive (read-only).
+///
+/// Hanya tersedia bila WinFsp terpasang di sistem. Gunakan
+/// [WinFspChecker.available] untuk memeriksa.
+class MacMount {
+  Pointer<Void> _handle;
+  final String mountPoint;
+  bool _active;
+
+  MacMount._(this._handle, this.mountPoint, this._active);
+
+  /// Mount volume pada [mountPoint] (mis. "M:"). Mengembalikan null bila gagal;
+  /// gunakan [MacMount.lastError] untuk pesan.
+  static String? lastError;
+
+  static MacMount? mount({
+    required int diskNumber,
+    required int offset,
+    required int length,
+    required int kind,
+    required int volumeIndex,
+    required String mountPoint,
+  }) {
+    MacFsLibrary.ensureLoaded();
+    lastError = null;
+    final pointPtr = mountPoint.toNativeUtf8();
+    try {
+      final handle = MacFsLibrary._mountVolume(
+          diskNumber, offset, length, kind, volumeIndex, pointPtr);
+      if (handle == nullptr) {
+        lastError = 'Gagal membuat handle mount';
+        return null;
+      }
+      final errorPtr = MacFsLibrary._mountError(handle);
+      if (errorPtr != nullptr) {
+        lastError = errorPtr.toDartString();
+        MacFsLibrary._unmount(handle);
+        return null;
+      }
+      final active = MacFsLibrary._mountIsActive(handle) == 1;
+      if (!active) {
+        lastError = 'Mount tidak aktif (drive letter mungkin dipakai)';
+        MacFsLibrary._unmount(handle);
+        return null;
+      }
+      final pointPtr2 = MacFsLibrary._mountPoint(handle);
+      final actual = pointPtr2 == nullptr ? mountPoint : pointPtr2.toDartString();
+      return MacMount._(handle, actual, true);
+    } finally {
+      malloc.free(pointPtr);
+    }
+  }
+
+  bool get isActive => _active && _handle != nullptr;
+
+  void unmount() {
+    if (_handle != nullptr) {
+      MacFsLibrary._unmount(_handle);
+      _handle = nullptr;
+      _active = false;
+    }
+  }
+}
+
+/// Pemeriksa ketersediaan WinFsp.
+class WinFspChecker {
+  static bool _cached = false;
+  static bool _checked = false;
+
+  static bool get available {
+    if (_checked) return _cached;
+    MacFsLibrary.ensureLoaded();
+    _cached = MacFsLibrary._winfspAvailable() == 1;
+    _checked = true;
+    return _cached;
+  }
+}

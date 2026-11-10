@@ -138,6 +138,36 @@ class L {
       'Retrying failed files...');
   String get startRetry => _t('Mencoba ulang', 'Retrying');
 
+  // ---------------------------------------------------------------- mount & info
+  String get diskInfo => _t('Info Disk', 'Disk Info');
+  String get mountAsDrive => _t('Mount sebagai Drive', 'Mount as Drive');
+  String get unmountDrive => _t('Lepas Mount', 'Unmount');
+  String get mountedAt => _t('Ter-mount di', 'Mounted at');
+  String get mountNeedsWinFsp => _t(
+      'WinFsp belum terpasang. Fitur mount memerlukan WinFsp (gratis, open source).',
+      'WinFsp is not installed. The mount feature requires WinFsp (free, open source).');
+  String get downloadWinFsp => _t('Buka winfsp.dev', 'Open winfsp.dev');
+  String get mountFailed => _t('Gagal mount', 'Mount failed');
+  String get mountReadOnlyNote => _t(
+      'Mount bersifat read-only — aman untuk data.',
+      'Mount is read-only — safe for your data.');
+  String get volumeLabel => _t('Volume', 'Volume');
+  String get filesystemLabel => _t('Filesystem', 'Filesystem');
+  String get capacityLabel => _t('Kapasitas partisi', 'Partition size');
+  String get encryptedLabel => _t('Terenkripsi', 'Encrypted');
+  String get notEncrypted => _t('Tidak', 'No');
+  String get yesLabel => _t('Ya', 'Yes');
+  String get unlockTitle => _t('Volume terenkripsi', 'Encrypted volume');
+  String get unlockHint => _t(
+      'Volume APFS ini terenkripsi (FileVault). Masukkan password untuk membukanya.',
+      'This APFS volume is encrypted (FileVault). Enter the password to unlock it.');
+  String get passwordLabel => _t('Password', 'Password');
+  String get unlockButton => _t('Buka', 'Unlock');
+  String get unlockFailed => _t('Password salah atau volume bukan APFS terenkripsi',
+      'Wrong password or not an encrypted APFS volume');
+  String get unlockOk => _t('Volume berhasil dibuka.', 'Volume unlocked.');
+  String get chooseLetter => _t('Pilih huruf drive', 'Choose drive letter');
+
   // ---------------------------------------------------------------- update
   String get checkUpdate => _t('Cek Update', 'Check for updates');
   String get updateAvailable => _t('Versi baru tersedia!', 'A new version is available!');

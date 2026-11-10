@@ -59,6 +59,10 @@ Built with **Flutter** and **Dart FFI** to native C libraries (libfsapfs, libfsh
 - **Auto-update**: checks GitHub Releases on startup (silent) and on click of the version
   in the status bar. One click on **Update Now** downloads, installs, and relaunches
   the new version automatically.
+- **Mount as a drive** (MacDrive-like): show a Mac volume as a drive letter in Windows
+  Explorer (read-only). Requires [WinFsp](https://winfsp.dev) (free, open source).
+- **Unlock encrypted APFS** (FileVault): password prompt for encrypted volumes.
+- **Disk info panel**: volume name, filesystem, partition size, encryption status.
 - **Auto UAC elevation** — the app requests Administrator on launch (required for raw disk access).
 
 ## Requirements
@@ -244,6 +248,11 @@ Dibangun dengan **Flutter** dan **Dart FFI** ke library native C (libfsapfs, lib
 - **Auto-update**: memeriksa GitHub Releases saat startup (senyap) dan saat versi
   di status bar diklik. Satu klik **Update Sekarang** akan mengunduh, memasang,
   lalu membuka ulang aplikasi dengan versi terbaru secara otomatis.
+- **Mount sebagai drive** (seperti MacDrive): menampilkan volume Mac sebagai huruf
+  drive di Windows Explorer (read-only). Memerlukan [WinFsp](https://winfsp.dev)
+  (gratis, open source).
+- **Buka APFS terenkripsi** (FileVault): dialog password untuk volume terenkripsi.
+- **Panel info disk**: nama volume, filesystem, ukuran partisi, status enkripsi.
 - **Auto-elevasi UAC** — aplikasi meminta hak Administrator saat dijalankan (wajib untuk akses raw disk).
 
 ## Persyaratan

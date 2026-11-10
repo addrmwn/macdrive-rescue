@@ -1,4 +1,4 @@
-# Mengunduh dan mengekstrak source library native (libfsapfs, libfshfs, zlib)
+﻿# Mengunduh dan mengekstrak source library native (libfsapfs, libfshfs, zlib)
 # ke folder native/vendor. Jalankan sekali sebelum native/build.bat.
 #
 # Sumber: sdist PyPI (berisi source C lengkap libyal + semua dependensi)
@@ -85,3 +85,25 @@ foreach ($dir in $prune) {
 }
 
 Write-Host "[OK] native/vendor siap. Lanjutkan dengan native/build.bat"
+
+# ---- WinFsp header + import library (untuk fitur mount) ----
+$winfspDir = Join-Path $PSScriptRoot "vendor_winfsp"
+if (-not (Test-Path (Join-Path $winfspDir "winfsp\winfsp.h"))) {
+  Write-Host "[winfsp] Mengunduh WinFsp (header + lib)..."
+  $msi = Join-Path $downloads "winfsp.msi"
+  if (-not (Test-Path $msi)) {
+    Invoke-WebRequest "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" `
+        -OutFile $msi -UseBasicParsing
+  }
+  $extract = Join-Path $downloads "winfsp_extract"
+  if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+  & "C:\Program Files\7-Zip\7z.exe" x $msi -o"$extract" -y | Out-Null
+  New-Item -ItemType Directory -Force (Join-Path $winfspDir "winfsp") | Out-Null
+  Copy-Item (Join-Path $extract "winfsp.h") (Join-Path $winfspDir "winfsp\\winfsp.h") -Force
+  Copy-Item (Join-Path $extract "fsctl.h") (Join-Path $winfspDir "winfsp\\fsctl.h") -Force
+  Copy-Item (Join-Path $extract "winfsp_x64.lib") $winfspDir -Force
+  Copy-Item (Join-Path $extract "winfsp_a64.lib") $winfspDir -Force
+  Write-Host "[OK] WinFsp header/lib siap."
+} else {
+  Write-Host "[OK] WinFsp header/lib sudah ada."
+}

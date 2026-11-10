@@ -76,7 +76,9 @@ REM ============================================================
 echo [5/6] bridge
 REM ============================================================
 if not exist "%OBJ%\bridge" mkdir "%OBJ%\bridge"
-cl %CFLAGS% %LOCAL_DEFS% /Fo"%OBJ%\bridge\\" /I"%BRIDGE%" %APFS_INC% /I"%VENDOR%\include_hfs" "%BRIDGE%\macfs_bridge.c" > "%OBJ%\bridge.log" 2>&1
+cl %CFLAGS% %LOCAL_DEFS% /Fo"%OBJ%\bridge\\" /I"%BRIDGE%" /I"%ROOT%\vendor_winfsp" %APFS_INC% /I"%VENDOR%\include_hfs" "%BRIDGE%\macfs_bridge.c" > "%OBJ%\bridge.log" 2>&1
+if errorlevel 1 ( echo [ERROR] bridge gagal & type "%OBJ%\bridge.log" & exit /b 1 )
+cl %CFLAGS% %LOCAL_DEFS% /Fo"%OBJ%\bridge\\" /I"%BRIDGE%" /I"%ROOT%\vendor_winfsp" %APFS_INC% /I"%VENDOR%\include_hfs" "%BRIDGE%\macfs_mount.c" >> "%OBJ%\bridge.log" 2>&1
 if errorlevel 1 ( echo [ERROR] bridge gagal & type "%OBJ%\bridge.log" & exit /b 1 )
 
 REM ============================================================

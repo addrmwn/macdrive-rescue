@@ -10,6 +10,7 @@ import 'package:macdrive_rescue/core/l10n.dart';
 import 'package:macdrive_rescue/core/macfs_ffi.dart';
 import 'package:macdrive_rescue/core/settings.dart';
 import 'package:macdrive_rescue/core/updater.dart';
+import 'package:macdrive_rescue/ui/dialogs.dart';
 import 'package:macdrive_rescue/ui/theme.dart';
 import 'package:macdrive_rescue/ui/widgets.dart';
 
@@ -314,6 +315,22 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       for (final d in drives.where((d) => !d.isUsable)) {
         _log('Tidak bisa dipakai: ${d.label}', level: _LogLevel.warn);
+      }
+      // Tawarkan unlock bila ada volume terenkripsi.
+      final locked = drives.where(
+          (d) => (d.error ?? '').toLowerCase().contains('terkunci') ||
+              (d.error ?? '').toLowerCase().contains('locked'));
+      for (final drive in locked.toList()) {
+        if (!mounted) break;
+        final unlocked = await showDialog<bool>(
+          context: context,
+          builder: (_) => UnlockDialog(drive: drive),
+        );
+        if (unlocked == true) {
+          _log('${_t.unlockOk} (${drive.volumeName})', level: _LogLevel.ok);
+          await _scanDrives();
+          return;
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -846,6 +863,17 @@ void onEvent(Map<String, dynamic> event) {
                 label: _t.rescan,
                 icon: Icons.refresh_rounded,
                 onPressed: _busy ? null : _scanDrives,
+              ),
+              const SizedBox(width: 8),
+              SecondaryButton(
+                label: _t.diskInfo,
+                icon: Icons.info_outline_rounded,
+                onPressed: _selectedDrive == null
+                    ? null
+                    : () => showDialog<void>(
+                          context: context,
+                          builder: (_) => DiskInfoDialog(drive: _selectedDrive!),
+                        ),
               ),
             ],
           ),

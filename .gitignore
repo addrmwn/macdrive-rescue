@@ -13,6 +13,7 @@ build/
 
 # Native build artifacts (source diunduh via native/fetch_sources.ps1)
 native/vendor/
+native/vendor_winfsp/
 native/build/
 native/dist/*.lib
 native/dist/*.exp
