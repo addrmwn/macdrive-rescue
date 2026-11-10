@@ -202,60 +202,47 @@ static macfs_mount_handle *macfs_handle_from_fs(FSP_FILE_SYSTEM *fs) {
     return (macfs_mount_handle *)fs->UserContext;
 }
 
+/* GetVolumeInfo(FileSystem, VolumeInfo) */
 static NTSTATUS macfs_fs_get_volume_info(FSP_FILE_SYSTEM *fs,
                                          FSP_FSCTL_VOLUME_INFO *info) {
     (void)fs;
     memset(info, 0, sizeof(*info));
-    wcscpy_s(info->VolumeLabel, sizeof(info->VolumeLabel) / sizeof(WCHAR),
-             L"Mac Volume");
+    static const WCHAR label[] = L"Mac Volume";
+    info->VolumeLabelLength = (UINT16)((sizeof(label) / sizeof(WCHAR) - 1) * sizeof(WCHAR));
+    memcpy(info->VolumeLabel, label, sizeof(label) - sizeof(WCHAR));
     info->TotalSize = 0;
     info->FreeSize = 0;
     return STATUS_SUCCESS;
 }
 
+/* GetSecurityByName(FileSystem, FileName, PFileAttributes, Security, PSecuritySize) */
 static NTSTATUS macfs_fs_get_security_by_name(FSP_FILE_SYSTEM *fs, PWSTR file_name,
-                                              UINT32 *attributes,
+                                              PUINT32 file_attributes,
                                               PSECURITY_DESCRIPTOR security,
-                                              PSIZE_T security_size) {
-    (void)file_name;
-    (void)security;
-    macfs_mount_handle *handle = macfs_handle_from_fs(fs);
-    if (handle == NULL) return STATUS_DEVICE_NOT_READY;
+                                              SIZE_T *security_size) {
+    (void)fs;
     if (security_size != NULL) *security_size = 0;
-    if (attributes != NULL) {
-        *attributes = FILE_ATTRIBUTE_READONLY;
-        /* Path kosong = root = direktori. */
+    if (file_attributes != NULL) {
+        *file_attributes = FILE_ATTRIBUTE_READONLY;
         if (file_name != NULL && file_name[0] == L'\0') {
-            *attributes |= FILE_ATTRIBUTE_DIRECTORY;
+            *file_attributes |= FILE_ATTRIBUTE_DIRECTORY;
+            *file_attributes &= ~FILE_ATTRIBUTE_READONLY;
         }
     }
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS macfs_fs_open(FSP_FILE_SYSTEM *fs, UINT32 create_options,
-                              UINT32 granted_access, PVOID *context,
-                              PWSTR file_name, PVOID *file_context,
-                              PSIZE_T file_context_size,
-                              PSECURITY_DESCRIPTOR security,
-                              PSIZE_T security_size, UINT64 *attributes,
-                              UINT64 *allocation_size, UINT64 *file_size,
-                              UINT64 *creation_time, UINT64 *last_access_time,
-                              UINT64 *last_write_time, UINT64 *change_time,
-                              UINT32 *index_number, UINT32 *case_sensitive,
-                              UINT32 *normalized_name) {
+/* Open(FileSystem, FileName, CreateOptions, GrantedAccess, PFileContext, FileInfo) */
+static NTSTATUS macfs_fs_open(FSP_FILE_SYSTEM *fs, PWSTR file_name,
+                              UINT32 create_options, UINT32 granted_access,
+                              PVOID *file_context, FSP_FSCTL_FILE_INFO *file_info) {
     (void)create_options;
     (void)granted_access;
-    (void)context;
-    (void)security;
-    (void)security_size;
-    (void)index_number;
-    (void)case_sensitive;
-    (void)normalized_name;
 
     macfs_mount_handle *handle = macfs_handle_from_fs(fs);
     if (handle == NULL || handle->ctx == NULL) return STATUS_DEVICE_NOT_READY;
 
-    /* Konversi path UTF-16 -> UTF-8 dan ganti '\' menjadi '/'. */
+    /* Konversi path UTF-16 -> UTF-8, '\' -> '/'. */
     char path_utf8[2048];
     int length = WideCharToMultiByte(CP_UTF8, 0, file_name, -1, path_utf8,
                                      sizeof(path_utf8), NULL, NULL);
@@ -264,41 +251,117 @@ static NTSTATUS macfs_fs_open(FSP_FILE_SYSTEM *fs, UINT32 create_options,
         if (*p == '\\') *p = '/';
     }
 
-    int64_t id = 0;
+    int64_t id;
     if (path_utf8[0] == '\0') {
         id = handle->root_id;
-        /* root tidak dimiliki pemanggil (dipakai bersama) */
     } else {
         id = macfs_resolve_path(handle->ctx, handle->root_id, path_utf8);
         if (id == 0) return STATUS_OBJECT_NAME_NOT_FOUND;
-        if (id == handle->root_id) id = handle->root_id;
     }
 
     *file_context = (PVOID)(intptr_t)id;
-    if (file_context_size != NULL) *file_context_size = 0;
-
-    FSP_FSCTL_FILE_INFO info;
-    macfs_fill_file_info(handle->ctx, id, &info);
-    if (attributes != NULL) *attributes = info.FileAttributes;
-    if (allocation_size != NULL) *allocation_size = info.AllocationSize;
-    if (file_size != NULL) *file_size = info.FileSize;
-    if (creation_time != NULL) *creation_time = info.CreationTime;
-    if (last_access_time != NULL) *last_access_time = info.LastAccessTime;
-    if (last_write_time != NULL) *last_write_time = info.LastWriteTime;
-    if (change_time != NULL) *change_time = info.ChangeTime;
+    macfs_fill_file_info(handle->ctx, id, file_info);
     return STATUS_SUCCESS;
 }
 
+/* Cleanup(FileSystem, FileContext, FileName, Flags) */
+static VOID macfs_fs_cleanup(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                             PWSTR file_name, ULONG flags) {
+    (void)fs;
+    (void)file_context;
+    (void)file_name;
+    (void)flags;
+}
+
+/* Close(FileSystem, FileContext) */
 static VOID macfs_fs_close(FSP_FILE_SYSTEM *fs, PVOID file_context) {
     macfs_mount_handle *handle = macfs_handle_from_fs(fs);
     if (handle == NULL || handle->ctx == NULL) return;
     int64_t id = (int64_t)(intptr_t)file_context;
-    /* root_id dipakai bersama; entry lain dilepas. */
     if (id != 0 && id != handle->root_id) {
         macfs_entry_release(handle->ctx, id);
     }
 }
 
+/* Read(FileSystem, FileContext, Buffer, Offset, Length, PBytesTransferred) */
+static NTSTATUS macfs_fs_read(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                              PVOID buffer, UINT64 offset, ULONG length,
+                              PULONG bytes_transferred) {
+    macfs_mount_handle *handle = macfs_handle_from_fs(fs);
+    if (handle == NULL || handle->ctx == NULL) return STATUS_DEVICE_NOT_READY;
+    int64_t id = (int64_t)(intptr_t)file_context;
+    int64_t read = macfs_read_at(handle->ctx, id, buffer, length, offset);
+    if (read < 0) return STATUS_DEVICE_DATA_ERROR;
+    *bytes_transferred = (ULONG)read;
+    return STATUS_SUCCESS;
+}
+
+/* Write -> read-only */
+static NTSTATUS macfs_fs_write(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                               PVOID buffer, UINT64 offset, ULONG length,
+                               PULONG bytes_transferred) {
+    (void)fs; (void)file_context; (void)buffer; (void)offset; (void)length;
+    (void)bytes_transferred;
+    return STATUS_MEDIA_WRITE_PROTECTED;
+}
+
+/* GetFileInfo(FileSystem, FileContext, FileInfo) */
+static NTSTATUS macfs_fs_get_file_info(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                                       FSP_FSCTL_FILE_INFO *file_info) {
+    macfs_mount_handle *handle = macfs_handle_from_fs(fs);
+    if (handle == NULL || handle->ctx == NULL) return STATUS_DEVICE_NOT_READY;
+    int64_t id = (int64_t)(intptr_t)file_context;
+    macfs_fill_file_info(handle->ctx, id, file_info);
+    return STATUS_SUCCESS;
+}
+
+/* SetBasicInfo -> read-only */
+static NTSTATUS macfs_fs_set_basic_info(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                                        UINT32 file_attributes,
+                                        UINT64 creation_time,
+                                        UINT64 last_access_time,
+                                        UINT64 last_write_time,
+                                        UINT64 change_time,
+                                        FSP_FSCTL_FILE_INFO *file_info) {
+    (void)fs; (void)file_context; (void)file_attributes; (void)creation_time;
+    (void)last_access_time; (void)last_write_time; (void)change_time;
+    (void)file_info;
+    return STATUS_MEDIA_WRITE_PROTECTED;
+}
+
+/* SetFileSize -> read-only */
+static NTSTATUS macfs_fs_set_file_size(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                                       UINT64 new_size, BOOLEAN set_allocation_size,
+                                       FSP_FSCTL_FILE_INFO *file_info) {
+    (void)fs; (void)file_context; (void)new_size; (void)set_allocation_size;
+    (void)file_info;
+    return STATUS_MEDIA_WRITE_PROTECTED;
+}
+
+/* CanDelete -> false */
+static NTSTATUS macfs_fs_can_delete(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                                    PWSTR file_name) {
+    (void)fs; (void)file_context; (void)file_name;
+    return STATUS_MEDIA_WRITE_PROTECTED;
+}
+
+/* Rename -> read-only */
+static NTSTATUS macfs_fs_rename(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                                PWSTR file_name, PWSTR new_file_name,
+                                BOOLEAN replace_if_exists) {
+    (void)fs; (void)file_context; (void)file_name; (void)new_file_name;
+    (void)replace_if_exists;
+    return STATUS_MEDIA_WRITE_PROTECTED;
+}
+
+/* SetDelete -> read-only */
+static NTSTATUS macfs_fs_set_delete(FSP_FILE_SYSTEM *fs, PVOID file_context,
+                                    PWSTR file_name, BOOLEAN delete_file) {
+    (void)fs; (void)file_context; (void)file_name; (void)delete_file;
+    return STATUS_MEDIA_WRITE_PROTECTED;
+}
+
+/* ReadDirectory(FileSystem, FileContext, Pattern, Marker, Buffer, Length, PBytesTransferred) */
 static NTSTATUS macfs_fs_read_directory(FSP_FILE_SYSTEM *fs, PVOID file_context,
                                         PWSTR pattern, PWSTR marker,
                                         PVOID buffer, ULONG buffer_length,
@@ -340,19 +403,17 @@ static NTSTATUS macfs_fs_read_directory(FSP_FILE_SYSTEM *fs, PVOID file_context,
             continue;
         }
 
-        /* Bangun FSP_FSCTL_DIR_INFO untuk entri ini. */
         ULONG name_bytes = (ULONG)((name_length - 1) * sizeof(WCHAR));
-        ULONG entry_size = (ULONG)(sizeof(FSP_FSCTL_DIR_INFO) + name_bytes);
-        FSP_FSCTL_DIR_INFO *dir_info = (FSP_FSCTL_DIR_INFO *)malloc(entry_size);
+        ULONG entry_size = (ULONG)(sizeof(FSP_FSCTL_DIR_INFO) + name_bytes +
+                                   sizeof(WCHAR));
+        FSP_FSCTL_DIR_INFO *dir_info = (FSP_FSCTL_DIR_INFO *)calloc(1, entry_size);
         if (dir_info == NULL) {
             macfs_entry_release(handle->ctx, child);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
-        memset(dir_info, 0, entry_size);
         dir_info->Size = (UINT16)entry_size;
         macfs_fill_file_info(handle->ctx, child, &dir_info->FileInfo);
         memcpy(dir_info->FileNameBuf, name_wide, name_bytes);
-        dir_info->FileNameBuf[name_bytes / sizeof(WCHAR)] = L'\0';
 
         BOOLEAN added = g_winfsp.AddDirInfo(dir_info, buffer, buffer_length,
                                             bytes_transferred);
@@ -363,88 +424,6 @@ static NTSTATUS macfs_fs_read_directory(FSP_FILE_SYSTEM *fs, PVOID file_context,
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS macfs_fs_read(FSP_FILE_SYSTEM *fs, PVOID file_context,
-                              PVOID buffer, UINT64 offset, ULONG length,
-                              PULONG bytes_transferred) {
-    macfs_mount_handle *handle = macfs_handle_from_fs(fs);
-    if (handle == NULL || handle->ctx == NULL) return STATUS_DEVICE_NOT_READY;
-    int64_t id = (int64_t)(intptr_t)file_context;
-    int64_t read = macfs_read_at(handle->ctx, id, buffer, length, offset);
-    if (read < 0) return STATUS_DEVICE_DATA_ERROR;
-    *bytes_transferred = (ULONG)read;
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS macfs_fs_get_file_info(FSP_FILE_SYSTEM *fs, PVOID file_context,
-                                       FSP_FSCTL_FILE_INFO *file_info) {
-    macfs_mount_handle *handle = macfs_handle_from_fs(fs);
-    if (handle == NULL || handle->ctx == NULL) return STATUS_DEVICE_NOT_READY;
-    int64_t id = (int64_t)(intptr_t)file_context;
-    macfs_fill_file_info(handle->ctx, id, file_info);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS macfs_fs_write(FSP_FILE_SYSTEM *fs, PVOID file_context,
-                               PVOID buffer, UINT64 offset, ULONG length,
-                               PULONG bytes_transferred) {
-    (void)fs;
-    (void)file_context;
-    (void)buffer;
-    (void)offset;
-    (void)length;
-    (void)bytes_transferred;
-    return STATUS_MEDIA_WRITE_PROTECTED;
-}
-
-static NTSTATUS macfs_fs_set_file_size(FSP_FILE_SYSTEM *fs, PVOID file_context,
-                                       UINT64 new_size, PVOID buffer,
-                                       UINT64 offset, ULONG length,
-                                       PULONG bytes_transferred) {
-    (void)fs;
-    (void)file_context;
-    (void)new_size;
-    (void)buffer;
-    (void)offset;
-    (void)length;
-    (void)bytes_transferred;
-    return STATUS_MEDIA_WRITE_PROTECTED;
-}
-
-static NTSTATUS macfs_fs_set_file_info(FSP_FILE_SYSTEM *fs, PVOID file_context,
-                                       UINT32 file_attributes,
-                                       UINT64 creation_time,
-                                       UINT64 last_access_time,
-                                       UINT64 last_write_time,
-                                       UINT64 change_time) {
-    (void)fs;
-    (void)file_context;
-    (void)file_attributes;
-    (void)creation_time;
-    (void)last_access_time;
-    (void)last_write_time;
-    (void)change_time;
-    return STATUS_MEDIA_WRITE_PROTECTED;
-}
-
-static NTSTATUS macfs_fs_rename(FSP_FILE_SYSTEM *fs, PVOID file_context,
-                                PWSTR file_name, PWSTR new_file_name,
-                                BOOLEAN replace_if_exists) {
-    (void)fs;
-    (void)file_context;
-    (void)file_name;
-    (void)new_file_name;
-    (void)replace_if_exists;
-    return STATUS_MEDIA_WRITE_PROTECTED;
-}
-
-static VOID macfs_fs_cleanup(FSP_FILE_SYSTEM *fs, PVOID file_context,
-                             PWSTR file_name, ULONG flags) {
-    (void)fs;
-    (void)file_context;
-    (void)file_name;
-    (void)flags;
-}
-
 /* ------------------------------------------------------------------ */
 /* Bagian 5: mount / unmount                                          */
 /* ------------------------------------------------------------------ */
@@ -453,15 +432,17 @@ static const FSP_FILE_SYSTEM_INTERFACE g_interface = {
     .GetVolumeInfo = macfs_fs_get_volume_info,
     .GetSecurityByName = macfs_fs_get_security_by_name,
     .Open = macfs_fs_open,
+    .Cleanup = macfs_fs_cleanup,
     .Close = macfs_fs_close,
     .Read = macfs_fs_read,
-    .GetFileInfo = macfs_fs_get_file_info,
-    .ReadDirectory = macfs_fs_read_directory,
     .Write = macfs_fs_write,
+    .GetFileInfo = macfs_fs_get_file_info,
+    .SetBasicInfo = macfs_fs_set_basic_info,
     .SetFileSize = macfs_fs_set_file_size,
-    .SetBasicInfo = macfs_fs_set_file_info,
+    .CanDelete = macfs_fs_can_delete,
     .Rename = macfs_fs_rename,
-    .Cleanup = macfs_fs_cleanup,
+    .SetDelete = macfs_fs_set_delete,
+    .ReadDirectory = macfs_fs_read_directory,
 };
 
 MACFS_MOUNT_API macfs_mount_handle *macfs_mount_volume(
@@ -550,7 +531,7 @@ int macfs_mount_start(macfs_mount_handle *handle, macfs_ctx *ctx,
         g_winfsp.Delete(file_system);
         return 0;
     }
-    status = g_winfsp.StartDispatcher(file_system, 0);
+    status = g_winfsp.StartDispatcher(file_system, 1);
     if (status != STATUS_SUCCESS) {
         snprintf(handle->error, sizeof(handle->error),
                  "StartDispatcher gagal (0x%08lX)", (unsigned long)status);
@@ -562,6 +543,32 @@ int macfs_mount_start(macfs_mount_handle *handle, macfs_ctx *ctx,
     WideCharToMultiByte(CP_UTF8, 0, mount_point, -1, handle->mount_point,
                         sizeof(handle->mount_point), NULL, NULL);
     handle->file_system = file_system;
+
+    /* Verifikasi non-intrusif (tidak menyentuh filesystem, menghindari crash):
+     * pastikan drive letter terdaftar sebagai root drive valid. */
+    int verified = 0;
+    for (int attempt = 0; attempt < 10; attempt++) {
+        wchar_t root[4];
+        _snwprintf(root, 4, L"%c:\\", mount_point[0]);
+        UINT type = GetDriveTypeW(root);
+        if (type != DRIVE_NO_ROOT_DIR && type != DRIVE_UNKNOWN) {
+            verified = 1;
+            break;
+        }
+        Sleep(200);
+    }
+    if (!verified) {
+        macfs_set_mount_error(
+            handle,
+            "Mount tidak dapat diakses di sistem ini. Fitur salin data tetap "
+            "berfungsi normal. Coba restart PC; bila tetap gagal, reinstall WinFsp.");
+        g_winfsp.StopDispatcher(file_system);
+        g_winfsp.SetMountPoint(file_system, NULL);
+        g_winfsp.Delete(file_system);
+        handle->file_system = NULL;
+        return 0;
+    }
+
     handle->mounted = 1;
     return 1;
 }

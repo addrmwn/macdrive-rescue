@@ -159,6 +159,10 @@ class _DiskInfoDialogState extends State<DiskInfoDialog> {
               const SizedBox(height: 8),
               Text(_error!,
                   style: const TextStyle(color: AppColors.red, fontSize: 12)),
+              const SizedBox(height: 6),
+              Text(_t.mountTroubleshoot,
+                  style: const TextStyle(
+                      color: AppColors.muted, fontSize: 11, height: 1.4)),
             ],
             if (!winfsp) ...[
               const SizedBox(height: 10),

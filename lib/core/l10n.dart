@@ -167,6 +167,14 @@ class L {
       'Wrong password or not an encrypted APFS volume');
   String get unlockOk => _t('Volume berhasil dibuka.', 'Volume unlocked.');
   String get chooseLetter => _t('Pilih huruf drive', 'Choose drive letter');
+  String get mountTroubleshoot => _t(
+      'Jika mount gagal setelah WinFsp terpasang: restart PC, lalu coba lagi. '
+      'Bila masih gagal, reinstall WinFsp (winfsp.dev) dan pastikan driver aktif.',
+      'If mounting fails after installing WinFsp: restart your PC and try again. '
+      'If it still fails, reinstall WinFsp (winfsp.dev) and make sure the driver is active.');
+  String get mountDriveLetterInUse => _t(
+      'Huruf drive sudah dipakai — pilih huruf lain.',
+      'Drive letter already in use — choose another letter.');
 
   // ---------------------------------------------------------------- update
   String get checkUpdate => _t('Cek Update', 'Check for updates');

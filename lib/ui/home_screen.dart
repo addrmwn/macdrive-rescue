@@ -1150,6 +1150,16 @@ const SizedBox(width: 12),
           icon: Icons.folder_special_rounded,
           onPressed: _openDestination,
         ),
+        const SizedBox(width: 8),
+        SecondaryButton(
+          label: _checkingUpdate
+              ? _t.checkingUpdate
+              : '${_t.checkUpdate}  (v$appVersion)',
+          icon: Icons.system_update_rounded,
+          onPressed: (_checkingUpdate || _downloadingUpdate)
+              ? null
+              : _manualCheckUpdate,
+        ),
         const Spacer(),
         if (_scanning || _copying)
           const SizedBox(
