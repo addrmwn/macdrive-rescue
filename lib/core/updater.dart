@@ -12,7 +12,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-const appVersion = '2.3.4';
+const appVersion = '2.3.5';
 
 const _repoOwner = 'addrmwn';
 const _repoName = 'macdrive-rescue';

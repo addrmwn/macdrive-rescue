@@ -22,6 +22,7 @@ typedef NTSTATUS *PNTSTATUS;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include "macfs_bridge.h"
 
 /* ------------------------------------------------------------------ */
@@ -117,7 +118,7 @@ struct macfs_mount_handle {
     FSP_FILE_SYSTEM *file_system;
     macfs_ctx *ctx;
     int64_t root_id;
-    char mount_point[32];
+    char mount_point[1024];
     char error[512];
     int mounted;
 };
@@ -198,6 +199,22 @@ static int64_t macfs_resolve_path(macfs_ctx *ctx, int64_t root_id,
 /* Bagian 4: interface WinFsp                                         */
 /* ------------------------------------------------------------------ */
 
+/* Logging diagnostik ke %TEMP%\\macfs_mount_log.txt */
+static void macfs_log(const char *fmt, ...) {
+    const char *temp = getenv("TEMP");
+    if (temp == NULL) return;
+    char path[512];
+    _snprintf(path, sizeof(path), "%s\\macfs_mount_log.txt", temp);
+    FILE *file = fopen(path, "a");
+    if (file == NULL) return;
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(file, fmt, args);
+    va_end(args);
+    fprintf(file, "\n");
+    fclose(file);
+}
+
 static macfs_mount_handle *macfs_handle_from_fs(FSP_FILE_SYSTEM *fs) {
     return (macfs_mount_handle *)fs->UserContext;
 }
@@ -205,6 +222,7 @@ static macfs_mount_handle *macfs_handle_from_fs(FSP_FILE_SYSTEM *fs) {
 /* GetVolumeInfo(FileSystem, VolumeInfo) */
 static NTSTATUS macfs_fs_get_volume_info(FSP_FILE_SYSTEM *fs,
                                          FSP_FSCTL_VOLUME_INFO *info) {
+    macfs_log("GetVolumeInfo");
     (void)fs;
     memset(info, 0, sizeof(*info));
     static const WCHAR label[] = L"Mac Volume";
@@ -261,6 +279,7 @@ static NTSTATUS macfs_fs_open(FSP_FILE_SYSTEM *fs, PWSTR file_name,
 
     *file_context = (PVOID)(intptr_t)id;
     macfs_fill_file_info(handle->ctx, id, file_info);
+    macfs_log("Open ok: path='%s' id=%lld", path_utf8, (long long)id);
     return STATUS_SUCCESS;
 }
 
@@ -372,6 +391,7 @@ static NTSTATUS macfs_fs_read_directory(FSP_FILE_SYSTEM *fs, PVOID file_context,
 
     int64_t dir_id = (int64_t)(intptr_t)file_context;
     int count = macfs_entry_count(handle->ctx, dir_id);
+    macfs_log("ReadDirectory dir_id=%lld count=%d", (long long)dir_id, count);
     if (count < 0) return STATUS_INVALID_DEVICE_REQUEST;
 
     *bytes_transferred = 0;
@@ -457,8 +477,10 @@ MACFS_MOUNT_API macfs_mount_handle *macfs_mount_volume(
                               "WinFsp belum terpasang. Unduh dari winfsp.dev");
         return handle;
     }
-    if (mount_point_utf8 == NULL || strlen(mount_point_utf8) < 2) {
-        macfs_set_mount_error(handle, "Huruf drive tidak valid");
+    /* Kosong ("") diperbolehkan: WinFsp akan memilih huruf drive otomatis
+     * dari Z: ke bawah. Ini lebih andal daripada huruf yang ditentukan. */
+    if (mount_point_utf8 == NULL) {
+        macfs_set_mount_error(handle, "Mount point tidak valid");
         return handle;
     }
 
@@ -477,9 +499,20 @@ MACFS_MOUNT_API macfs_mount_handle *macfs_mount_volume(
         }
     }
 
-    WCHAR mount_point_wide[32];
-    MultiByteToWideChar(CP_UTF8, 0, mount_point_utf8, -1, mount_point_wide,
-                        sizeof(mount_point_wide) / sizeof(WCHAR));
+    /* Buffer harus cukup untuk path folder (bukan hanya "X:").
+     * Sebelumnya 32 karakter, sehingga path panjang terpotong dan mount
+     * ke folder selalu gagal. */
+    WCHAR mount_point_wide[1024];
+    int mount_point_length = MultiByteToWideChar(
+        CP_UTF8, 0, mount_point_utf8, -1, mount_point_wide,
+        (int)(sizeof(mount_point_wide) / sizeof(WCHAR)));
+    macfs_log("mount request: '%s' (len=%d)", mount_point_utf8,
+              mount_point_length);
+    if (mount_point_length <= 0) {
+        macfs_set_mount_error(handle, "Mount point tidak valid");
+        macfs_close(ctx);
+        return handle;
+    }
 
     if (!macfs_mount_start(handle, ctx, mount_point_wide)) {
         macfs_close(ctx);
@@ -502,20 +535,48 @@ int macfs_mount_start(macfs_mount_handle *handle, macfs_ctx *ctx,
 
     FSP_FSCTL_VOLUME_PARAMS params;
     memset(&params, 0, sizeof(params));
-    params.Version = sizeof(params);
+    params.Version = sizeof(FSP_FSCTL_VOLUME_PARAMS);
     params.SectorSize = 512;
     params.SectorsPerAllocationUnit = 8;
     params.MaxComponentLength = 255;
-    params.VolumeSerialNumber = 0x4D414346;
+
+    /* VolumeCreationTime wajib berupa nilai waktu yang valid (sample resmi
+     * memfs mengisinya). Nilai 0 membuat mounting gagal melayani I/O. */
+    FILETIME now;
+    GetSystemTimeAsFileTime(&now);
+    params.VolumeCreationTime = ((UINT64)now.dwHighDateTime << 32) | now.dwLowDateTime;
+    params.VolumeSerialNumber = (UINT32)(GetTickCount());
+
+    /* IrpTimeout HARUS dalam rentang 1 menit - 10 menit (60000-600000 ms).
+     * IrpCapacity HARUS dalam rentang 100 - 1000.
+     * Nilai 0 membuat driver menolak IRP -> mount sukses tetapi semua I/O
+     * gagal, persis gejala yang terjadi. */
+    params.TransactTimeout = 0; /* deprecated, biarkan 0 */
+    params.IrpTimeout = 60000;  /* 1 menit (batas bawah) */
+    params.IrpCapacity = 1000;  /* maksimum */
     params.FileInfoTimeout = 1000;
     params.CaseSensitiveSearch = 0;
     params.CasePreservedNames = 1;
     params.UnicodeOnDisk = 1;
+    params.PersistentAcls = 0;
+    params.ReparsePoints = 0;
+    params.NamedStreams = 0;
+    params.HardLinks = 0;
+    params.ExtendedAttributes = 0;
     params.ReadOnlyVolume = 1;
+    params.PostCleanupWhenModifiedOnly = 1;
+    params.PassQueryDirectoryFileName = 1;
+
+    macfs_log("mount_start: version=%u size=%u root_id=%lld",
+              (unsigned)params.Version,
+              (unsigned)sizeof(FSP_FSCTL_VOLUME_PARAMS),
+              (long long)handle->root_id);
 
     FSP_FILE_SYSTEM *file_system = NULL;
     NTSTATUS status = g_winfsp.Create(L"WinFsp.Disk", &params, &g_interface,
                                       &file_system);
+    macfs_log("Create -> 0x%08lX file_system=%p", (unsigned long)status,
+              (void *)file_system);
     if (status != STATUS_SUCCESS) {
         snprintf(handle->error, sizeof(handle->error),
                  "FspFileSystemCreate gagal (0x%08lX)", (unsigned long)status);
@@ -523,7 +584,17 @@ int macfs_mount_start(macfs_mount_handle *handle, macfs_ctx *ctx,
     }
     file_system->UserContext = handle;
 
-    status = g_winfsp.SetMountPoint(file_system, (PWSTR)mount_point);
+    /* Bersihkan sisa mount point sebelumnya (folder kosong sisa crash). */
+    if (mount_point[0] != L'\0' && mount_point[1] != L':') {
+        RemoveDirectoryW(mount_point);
+    }
+
+    /* Mount point kosong ("") = biarkan WinFsp memilih huruf drive dari Z:
+     * ke bawah (parameter NULL). Ini lebih andal daripada huruf eksplisit. */
+    PWSTR requested = (mount_point[0] == L'\0') ? NULL : (PWSTR)mount_point;
+    status = g_winfsp.SetMountPoint(file_system, requested);
+    macfs_log("SetMountPoint('%ls') -> 0x%08lX", mount_point,
+              (unsigned long)status);
     if (status != STATUS_SUCCESS) {
         snprintf(handle->error, sizeof(handle->error),
                  "SetMountPoint gagal (0x%08lX) - huruf drive dipakai?",
@@ -532,6 +603,7 @@ int macfs_mount_start(macfs_mount_handle *handle, macfs_ctx *ctx,
         return 0;
     }
     status = g_winfsp.StartDispatcher(file_system, 1);
+    macfs_log("StartDispatcher -> 0x%08lX", (unsigned long)status);
     if (status != STATUS_SUCCESS) {
         snprintf(handle->error, sizeof(handle->error),
                  "StartDispatcher gagal (0x%08lX)", (unsigned long)status);
@@ -544,29 +616,44 @@ int macfs_mount_start(macfs_mount_handle *handle, macfs_ctx *ctx,
                         sizeof(handle->mount_point), NULL, NULL);
     handle->file_system = file_system;
 
-    /* Verifikasi non-intrusif (tidak menyentuh filesystem, menghindari crash):
-     * pastikan drive letter terdaftar sebagai root drive valid. */
-    int verified = 0;
-    for (int attempt = 0; attempt < 10; attempt++) {
-        wchar_t root[4];
-        _snwprintf(root, 4, L"%c:\\", mount_point[0]);
-        UINT type = GetDriveTypeW(root);
-        if (type != DRIVE_NO_ROOT_DIR && type != DRIVE_UNKNOWN) {
-            verified = 1;
-            break;
+    /* Verifikasi hanya untuk huruf drive eksplisit. Untuk mode otomatis
+     * (mount_point kosong), WinFsp sudah memilih huruf sendiri; verifikasi
+     * tambahan memicu crash pada sebagian konfigurasi driver. */
+    int verified = 1;
+    if (mount_point[0] != L'\0') {
+        verified = 0;
+        DWORD last_error = 0;
+        for (int attempt = 0; attempt < 12; attempt++) {
+            wchar_t probe_path[16];
+            _snwprintf(probe_path, 16, L"\\\\?\\%c:", mount_point[0]);
+            HANDLE probe = CreateFileW(probe_path, 0,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE |
+                                           FILE_SHARE_DELETE,
+                                       NULL, OPEN_EXISTING,
+                                       FILE_FLAG_BACKUP_SEMANTICS, NULL);
+            if (probe != INVALID_HANDLE_VALUE) {
+                CloseHandle(probe);
+                verified = 1;
+                break;
+            }
+            last_error = GetLastError();
+            Sleep(200);
         }
-        Sleep(200);
-    }
-    if (!verified) {
-        macfs_set_mount_error(
-            handle,
-            "Mount tidak dapat diakses di sistem ini. Fitur salin data tetap "
-            "berfungsi normal. Coba restart PC; bila tetap gagal, reinstall WinFsp.");
-        g_winfsp.StopDispatcher(file_system);
-        g_winfsp.SetMountPoint(file_system, NULL);
-        g_winfsp.Delete(file_system);
-        handle->file_system = NULL;
-        return 0;
+        macfs_log("verifikasi '%ls': verified=%d error=%lu", mount_point,
+                  verified, (unsigned long)last_error);
+        if (!verified) {
+            snprintf(handle->error, sizeof(handle->error),
+                     "Drive tidak dapat diakses (error %lu). Restart PC lalu "
+                     "coba lagi.",
+                     (unsigned long)last_error);
+            g_winfsp.SetMountPoint(file_system, NULL);
+            g_winfsp.StopDispatcher(file_system);
+            g_winfsp.Delete(file_system);
+            handle->file_system = NULL;
+            return 0;
+        }
+    } else {
+        macfs_log("mode huruf otomatis: mount point ditentukan WinFsp");
     }
 
     handle->mounted = 1;

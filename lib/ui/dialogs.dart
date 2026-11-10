@@ -30,11 +30,46 @@ class _DiskInfoDialogState extends State<DiskInfoDialog> {
     super.dispose();
   }
 
+  /// Mount dengan huruf drive OTOMATIS (disarankan).
+  /// WinFsp memilih huruf sendiri dari Z: ke bawah, sehingga tidak ada
+  /// kemungkinan bentrok dengan huruf yang sudah dipakai.
+  Future<void> _mountAutomatic() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final drive = widget.drive;
+      final mount = MacMount.mount(
+        diskNumber: drive.diskNumber,
+        offset: drive.partition.start,
+        length: drive.partition.length,
+        kind: drive.fsKind,
+        volumeIndex: drive.volumeIndex,
+        mountPoint: '', // kosong = otomatis
+      );
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _mount = mount;
+        _error = mount == null
+            ? (MacMount.lastError ?? _t.mountFailed)
+            : null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  /// Mount manual: pengguna memilih huruf drive sendiri.
   Future<void> _chooseAndMount() async {
     final letters = <String>[];
     for (var c = 'M'.codeUnitAt(0); c <= 'Z'.codeUnitAt(0); c++) {
       final letter = String.fromCharCode(c);
-      // Lewati drive yang sudah ada.
       try {
         if (await Directory('$letter:\\').exists()) continue;
       } catch (_) {}
@@ -183,6 +218,15 @@ class _DiskInfoDialogState extends State<DiskInfoDialog> {
         ),
       ),
       actions: [
+        if (!winfsp)
+          TextButton.icon(
+            onPressed: () {
+              Process.start('cmd', ['/c', 'start', '', 'https://winfsp.dev/rel/'],
+                  mode: ProcessStartMode.detached, runInShell: true);
+            },
+            icon: const Icon(Icons.open_in_new_rounded, size: 15),
+            label: const Text('winfsp.dev'),
+          ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: Text(_t.cancel),
@@ -198,12 +242,23 @@ class _DiskInfoDialogState extends State<DiskInfoDialog> {
             icon: const Icon(Icons.link_off_rounded, size: 16),
             label: Text(_t.unmountDrive),
           )
-        else
-          FilledButton.icon(
+        else ...[
+          TextButton(
             onPressed: (_busy || !winfsp) ? null : _chooseAndMount,
-            icon: const Icon(Icons.drive_file_move_rounded, size: 16),
+            child: Text(_t.chooseLetter),
+          ),
+          FilledButton.icon(
+            onPressed: (_busy || !winfsp) ? null : _mountAutomatic,
+            icon: _busy
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.drive_file_move_rounded, size: 16),
             label: Text(_t.mountAsDrive),
           ),
+        ],
       ],
     );
   }

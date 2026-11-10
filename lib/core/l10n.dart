@@ -168,10 +168,17 @@ class L {
   String get unlockOk => _t('Volume berhasil dibuka.', 'Volume unlocked.');
   String get chooseLetter => _t('Pilih huruf drive', 'Choose drive letter');
   String get mountTroubleshoot => _t(
-      'Jika mount gagal setelah WinFsp terpasang: restart PC, lalu coba lagi. '
-      'Bila masih gagal, reinstall WinFsp (winfsp.dev) dan pastikan driver aktif.',
-      'If mounting fails after installing WinFsp: restart your PC and try again. '
-      'If it still fails, reinstall WinFsp (winfsp.dev) and make sure the driver is active.');
+      'Mount memerlukan driver WinFsp yang aktif. Jika gagal: buka winfsp.dev, '
+      'pasang ulang, lalu restart PC.\n\n'
+      'Belum berhasil? Tidak masalah - gunakan tombol "Mulai Transfer" untuk '
+      'menyalin data langsung (cara ini tidak butuh WinFsp).',
+      'Mounting needs an active WinFsp driver. If it fails: visit winfsp.dev, '
+      'reinstall, then restart your PC.\n\n'
+      'Still not working? No problem - use "Start Transfer" to copy your data '
+      'directly (this works without WinFsp).');
+  String get mountOptionalNote => _t(
+      'Mount hanya opsional. Menyalin data tetap berfungsi penuh tanpa WinFsp.',
+      'Mount is optional. Copying data works fully without WinFsp.');
   String get mountDriveLetterInUse => _t(
       'Huruf drive sudah dipakai — pilih huruf lain.',
       'Drive letter already in use — choose another letter.');
