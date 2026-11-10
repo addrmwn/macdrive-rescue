@@ -56,6 +56,9 @@ Built with **Flutter** and **Dart FFI** to native C libraries (libfsapfs, libfsh
 - **Remembers last settings** (destination, options, last volume, language).
 - CSV report (manifest + error list) in a `_laporan` subfolder.
 - **Bilingual UI**: English & Bahasa Indonesia (selector in the header).
+- **Auto-update**: checks GitHub Releases on startup (silent) and on click of the version
+  in the status bar. One click on **Update Now** downloads, installs, and relaunches
+  the new version automatically.
 - **Auto UAC elevation** — the app requests Administrator on launch (required for raw disk access).
 
 ## Requirements
@@ -121,6 +124,9 @@ powershell -ExecutionPolicy Bypass -File native/fetch_sources.ps1
 # 2. Build the native DLL (produces native/dist/macfs.dll)
 native/build.bat
 
+# 2b. Build the portable launcher (for auto-update support)
+native/build_launcher.bat
+
 # 3. Build the Flutter app
 flutter pub get
 flutter build windows --release
@@ -153,6 +159,8 @@ lib/
     widgets.dart               # UI components
 native/
   bridge/macfs_bridge.c/.h     # C bridge (compact API for Flutter)
+  launcher/launcher.c          # bootstrap: extract-once to %LOCALAPPDATA%
+  build_launcher.bat           # build launcher.exe
   shim/libbfio.h               # header shim
   fetch_sources.ps1            # download libfsapfs/libfshfs/zlib sources
   build.bat                    # build the DLL with MSVC
@@ -233,6 +241,9 @@ Dibangun dengan **Flutter** dan **Dart FFI** ke library native C (libfsapfs, lib
 - **Mengingat pengaturan terakhir** (folder tujuan, opsi, volume terakhir, bahasa).
 - **Laporan CSV** (manifest + daftar error) di subfolder `_laporan`.
 - **UI dwibahasa**: English & Bahasa Indonesia (selector di header).
+- **Auto-update**: memeriksa GitHub Releases saat startup (senyap) dan saat versi
+  di status bar diklik. Satu klik **Update Sekarang** akan mengunduh, memasang,
+  lalu membuka ulang aplikasi dengan versi terbaru secara otomatis.
 - **Auto-elevasi UAC** — aplikasi meminta hak Administrator saat dijalankan (wajib untuk akses raw disk).
 
 ## Persyaratan
@@ -299,6 +310,9 @@ powershell -ExecutionPolicy Bypass -File native/fetch_sources.ps1
 # 2. Build DLL native (menghasilkan native/dist/macfs.dll)
 native/build.bat
 
+# 2b. Build launcher portable (untuk dukungan auto-update)
+native/build_launcher.bat
+
 # 3. Build aplikasi Flutter
 flutter pub get
 flutter build windows --release
@@ -331,6 +345,8 @@ lib/
     widgets.dart               # komponen UI
 native/
   bridge/macfs_bridge.c/.h     # bridge C (API ringkas untuk Flutter)
+  launcher/launcher.c          # bootstrap: ekstrak sekali ke %LOCALAPPDATA%
+  build_launcher.bat           # build launcher.exe
   shim/libbfio.h               # shim header
   fetch_sources.ps1            # unduh source libfsapfs/libfshfs/zlib
   build.bat                    # build DLL dengan MSVC

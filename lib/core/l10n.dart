@@ -138,6 +138,24 @@ class L {
       'Retrying failed files...');
   String get startRetry => _t('Mencoba ulang', 'Retrying');
 
+  // ---------------------------------------------------------------- update
+  String get checkUpdate => _t('Cek Update', 'Check for updates');
+  String get updateAvailable => _t('Versi baru tersedia!', 'A new version is available!');
+  String get upToDate => _t('Aplikasi sudah versi terbaru.', 'You are on the latest version.');
+  String get checkingUpdate => _t('Memeriksa update...', 'Checking for updates...');
+  String get updateNow => _t('Update Sekarang', 'Update Now');
+  String get later => _t('Nanti', 'Later');
+  String get newVersion => _t('Versi terbaru', 'Latest version');
+  String get currentVersion => _t('Versi saat ini', 'Current version');
+  String get downloadingUpdate => _t('Mengunduh update...', 'Downloading update...');
+  String get updateReady => _t('Update siap dipasang.', 'Update ready to install.');
+  String get applyingUpdate => _t('Memasang update, aplikasi akan dibuka ulang...',
+      'Installing update, the app will restart...');
+  String get updateFailed => _t('Update gagal', 'Update failed');
+  String get checkUpdateFailed => _t('Gagal memeriksa update', 'Failed to check for updates');
+  String get releaseNotes => _t('Catatan rilis', 'Release notes');
+  String get updateAvailableAuto => _t('Update tersedia', 'Update available');
+
   // ---------------------------------------------------------------- error
   String get failOpenVolume => _t('Gagal membuka volume:', 'Failed to open volume:');
   String get sourceNotFound => _t('File/folder tidak ditemukan:',

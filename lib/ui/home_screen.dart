@@ -9,6 +9,7 @@ import 'package:macdrive_rescue/core/engine.dart';
 import 'package:macdrive_rescue/core/l10n.dart';
 import 'package:macdrive_rescue/core/macfs_ffi.dart';
 import 'package:macdrive_rescue/core/settings.dart';
+import 'package:macdrive_rescue/core/updater.dart';
 import 'package:macdrive_rescue/ui/theme.dart';
 import 'package:macdrive_rescue/ui/widgets.dart';
 
@@ -49,6 +50,12 @@ class _HomeScreenState extends State<HomeScreen> {
   // File yang gagal pada transfer terakhir (untuk tombol "Coba Lagi").
   List<FileTask> _failedFiles = [];
   String _lastDestRoot = '';
+
+  // Auto-update
+  bool _checkingUpdate = false;
+  UpdateInfo? _availableUpdate;
+  double _updateProgress = 0;
+  bool _downloadingUpdate = false;
 
   // Opsi
   bool _optSkipSystem = true;
@@ -119,6 +126,22 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     _updateFreeSpace();
     _destController.addListener(_updateFreeSpace);
+    // Cek update di latar belakang (tidak mengganggu startup).
+    _autoCheckUpdate();
+  }
+
+  Future<void> _autoCheckUpdate() async {
+    try {
+      await Future<void>.delayed(const Duration(seconds: 4));
+      final info = await Updater.check();
+      if (!mounted || info == null) return;
+      setState(() => _availableUpdate = info);
+      if (info.isNewer) {
+        _log('${_t.updateAvailable} ${info.tag}', level: _LogLevel.ok);
+      }
+    } catch (_) {
+      // Diamkan — auto-check tidak boleh mengganggu pengguna.
+    }
   }
 
   @override
@@ -412,7 +435,7 @@ final result = await scanVolume(
         _scanResult = result;
         _scanning = false;
         _summary =
-            '${result.files.length} file Â· ${result.dirs.length} folder Â· ${_humanSize(result.totalBytes)}';
+            '${result.files.length} file • ${result.dirs.length} folder • ${_humanSize(result.totalBytes)}';
       });
       _setStatus(_t.ready);
       _log(
@@ -993,7 +1016,7 @@ const SizedBox(width: 12),
                 const SizedBox(width: 8),
                 _dropdown(
                     _optColon,
-                    const ['-', '_', 'ï¼š'],
+                    const ['-', '_', '：'],
                     (v) => setState(() => _optColon = v),
                     width: 64),
               ]),
@@ -1242,6 +1265,187 @@ const SizedBox(width: 12),
     );
   }
 
+  // ================================================================ update
+  Future<void> _manualCheckUpdate() async {
+    setState(() => _checkingUpdate = true);
+    _setStatus(_t.checkingUpdate);
+    try {
+      final info = await Updater.check();
+      if (!mounted) return;
+      setState(() {
+        _checkingUpdate = false;
+        _availableUpdate = info;
+      });
+      if (info == null || !info.isNewer) {
+        _setStatus(_t.upToDate);
+        _log(_t.upToDate, level: _LogLevel.ok);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${_t.upToDate} (v$appVersion)'),
+              backgroundColor: AppColors.cardInner,
+            ),
+          );
+        }
+        return;
+      }
+      _log('${_t.updateAvailable} ${info.tag}', level: _LogLevel.ok);
+      if (mounted) await _showUpdateDialog(info);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _checkingUpdate = false);
+      _log('${_t.checkUpdateFailed}: $e', level: _LogLevel.error);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${_t.checkUpdateFailed}: $e'),
+            backgroundColor: AppColors.cardInner,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showUpdateDialog(UpdateInfo info) async {
+    setState(() => _updateProgress = 0);
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.system_update_rounded,
+                color: AppColors.accent, size: 22),
+            const SizedBox(width: 10),
+            Text(_t.updateAvailable,
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+          ],
+        ),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.cardInner,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text('${_t.currentVersion}: v$appVersion',
+                          style: const TextStyle(
+                              color: AppColors.muted, fontSize: 12.5)),
+                    ),
+                    Expanded(
+                      child: Text('${_t.newVersion}: ${info.tag}'
+                          '${info.downloadSize > 0 ? ' (${_HomeScreenState._humanSize(info.downloadSize)})' : ''}',
+                          style: const TextStyle(
+                              color: AppColors.green,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ),
+              if (info.releaseNotes.trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(_t.releaseNotes,
+                    style: const TextStyle(
+                        color: AppColors.text,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 180),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      info.releaseNotes
+                          .replaceAll(RegExp(r'^#+ ', multiLine: true), '')
+                          .replaceAll('**', '')
+                          .replaceAll('`', ''),
+                      style: const TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 11.5,
+                          height: 1.45),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'later'),
+            child: Text(_t.later),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'update'),
+            icon: const Icon(Icons.download_rounded, size: 16),
+            label: Text(_t.updateNow),
+          ),
+        ],
+      ),
+    );
+    if (action == 'update' && mounted) {
+      await _downloadAndApplyUpdate(info);
+    }
+  }
+
+  Future<void> _downloadAndApplyUpdate(UpdateInfo info) async {
+    setState(() {
+      _downloadingUpdate = true;
+      _updateProgress = 0;
+    });
+    _setStatus(_t.downloadingUpdate);
+    try {
+      final zip = await Updater.download(
+        info,
+        onProgress: (received, total) {
+          if (!mounted || total <= 0) return;
+          setState(() => _updateProgress = (received / total).clamp(0.0, 1.0));
+        },
+      );
+      if (!mounted) return;
+      _log('${_t.updateReady} (${_HomeScreenState._humanSize(zip.lengthSync())})',
+          level: _LogLevel.ok);
+      _setStatus(_t.applyingUpdate);
+
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(_t.updateReady),
+          content: Text(_t.applyingUpdate),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(_t.updateNow),
+            ),
+          ],
+        ),
+      );
+      if (confirm == true && mounted) {
+        await Updater.applyAndRestart(zip);
+        exit(0);
+      } else {
+        setState(() => _downloadingUpdate = false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _downloadingUpdate = false);
+      _log('${_t.updateFailed}: $e', level: _LogLevel.error);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${_t.updateFailed}: $e'),
+          backgroundColor: AppColors.cardInner,
+        ),
+      );
+    }
+  }
+
   Widget _buildStatusBar() {
     return Container(
       color: AppColors.headerBg,
@@ -1253,9 +1457,34 @@ const SizedBox(width: 12),
             style: const TextStyle(color: AppColors.muted, fontSize: 11.5),
           ),
           const Spacer(),
-          const Text(
-            'v2.1',
-            style: TextStyle(color: Color(0xFF4A4F63), fontSize: 10.5),
+          if (_checkingUpdate || _downloadingUpdate) ...[
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.5),
+            ),
+            const SizedBox(width: 8),
+          ],
+          InkWell(
+            onTap: (_checkingUpdate || _downloadingUpdate) ? null : _manualCheckUpdate,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Text(
+                _availableUpdate != null && _availableUpdate!.isNewer
+                    ? 'v$appVersion  \u2192  ${_availableUpdate!.tag}'
+                    : 'v$appVersion',
+                style: TextStyle(
+                  color: _availableUpdate != null && _availableUpdate!.isNewer
+                      ? AppColors.green
+                      : const Color(0xFF4A4F63),
+                  fontSize: 10.5,
+                  fontWeight: _availableUpdate != null && _availableUpdate!.isNewer
+                      ? FontWeight.w700
+                      : FontWeight.w400,
+                ),
+              ),
+            ),
           ),
         ],
       ),
